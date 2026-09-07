@@ -183,6 +183,10 @@ that workspace; deprovisioning cannot remove the workspace owner.
 FastCLM ships with synthetic data only. Do not load production agreements into
 an unreviewed demo deployment.
 
+The implementation decisions borrowed from lq-ai-fork and the local FastSME
+sister applications are recorded in the
+[source-pattern audit](docs/inspiration_audit.md).
+
 ## Licence
 
 MIT. See [LICENSE](LICENSE). FastCLM is part of the open-source

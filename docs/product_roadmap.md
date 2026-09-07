@@ -65,6 +65,10 @@ Updated: 2026-09-08
   drafting, signature preparation, approval configuration, notifications,
   retention, backups, and counsel requests, while human-only decisions and
   external dispatch remain deliberately outside the model catalogue.
+- Auditable source-pattern comparison against pinned lq-ai-fork, FastDocs,
+  FastWiki, and ai-indurent revisions; deterministic citation evidence names
+  its verification method and tolerates Unicode ligatures and line-end PDF
+  hyphenation while preserving exact immutable-source character offsets.
 
 ## Next production increments
 

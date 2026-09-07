@@ -131,9 +131,28 @@ def test_word_level_citations_require_consecutive_source_words():
     )
     assert answer == "The duty lasts three years [1]. A different claim [1 · unverified]."
     assert citations[0]["verified"] is True
+    assert citations[0]["verification_method"] == "consecutive_word_match"
+    assert citations[0]["verification_confidence"] == 1.0
     assert citations[0]["word_count"] == 3
     assert citations[0]["start_word"] == 8
     assert citations[1]["verified"] is False
+    assert citations[1]["verification_method"] == "failed"
+
+
+def test_word_verification_handles_pdf_hyphenation_and_unicode_ligatures():
+    source = {
+        "contract_id": "contract-1", "version_id": "version-1", "title": "Terms", "reference": "T-1",
+        "version_number": 1, "source_filename": "terms.pdf", "media_type": "application/pdf",
+        "body_text": "The oﬃcial thirty-\nday notice period applies.",
+    }
+    answer, citations = verify_word_citations(
+        "Notice is required [[cite:1|official thirty-day notice period]].",
+        [source],
+    )
+    assert answer == "Notice is required [1]."
+    assert citations[0]["verified"] is True
+    assert citations[0]["word_count"] == 5
+    assert source["body_text"][citations[0]["start_char"]:citations[0]["end_char"]] == "oﬃcial thirty-\nday notice period"
 
 
 def test_verified_citation_has_exact_character_and_page_anchor():

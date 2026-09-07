@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from collections.abc import Iterator
 
 import httpx
@@ -25,7 +26,7 @@ from fastclm.services.skills import SkillService
 
 
 WRITE_TOOLS = {"create_contract", "add_obligation", "transition_contract", "create_skill", "set_matter_context", "record_skill_test", "revise_skill", "propose_redline", "add_contract_comment", "create_assignment", "insert_library_clause", "assemble_template", "apply_playbook", "request_legal_review", "add_counterparty", "complete_obligation", "prepare_signature_request", "create_workspace_backup", "set_reminder_preferences", "create_reminder_escalation", "update_notification_template", "create_approval_policy", "create_approval_delegation", "set_retention_policy"}
-WORD_RE = re.compile(r"[\w]+(?:[’'-][\w]+)*", re.UNICODE)
+WORD_RE = re.compile(r"[\w]+(?:[’'][\w]+)*", re.UNICODE)
 CITATION_RE = re.compile(r"\[\[cite:(\d+)\|(.+?)\]\]", re.DOTALL | re.IGNORECASE)
 SKILL_REQUEST_RE = re.compile(r"\b(create|build|make|draft|design|improve|edit|want|need)\b.{0,40}\bskill\b|\bskill\b.{0,40}\b(create|builder|creator)\b", re.IGNORECASE)
 
@@ -62,7 +63,7 @@ def _terms(value: str) -> set[str]:
 
 
 def _normal_word(value: str) -> str:
-    return value.casefold().replace("’", "'")
+    return unicodedata.normalize("NFKC", value).casefold().replace("’", "'")
 
 
 def find_word_range(quote: str, body_text: str) -> tuple[int, int, int]:
@@ -123,6 +124,8 @@ def verify_word_citations(answer: str, sources: list[dict]) -> tuple[str, list[d
                 "version_id": source["version_id"], "title": source["title"], "reference": source["reference"],
                 "version": source["version_number"], "filename": source["source_filename"],
                 "media_type": source["media_type"], "quote": quote, "verified": is_verified,
+                "verification_method": "consecutive_word_match" if is_verified else "failed",
+                "verification_confidence": 1.0 if is_verified else 0.0,
                 **anchor,
             })
         return f"[{source_number}]" if is_verified else f"[{source_number} · unverified]"
