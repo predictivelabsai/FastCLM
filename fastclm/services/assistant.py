@@ -13,11 +13,12 @@ from fastclm.security import Actor
 from fastclm.services.audit import AuditService
 from fastclm.services.contracts import ContractService
 from fastclm.services.credentials import authorize, refund
+from fastclm.services.drafting import DraftingService
 from fastclm.services.identity import new_id, now
 from fastclm.services.skills import SkillService
 
 
-WRITE_TOOLS = {"create_contract", "add_obligation", "transition_contract", "create_skill", "set_matter_context", "record_skill_test", "revise_skill"}
+WRITE_TOOLS = {"create_contract", "add_obligation", "transition_contract", "create_skill", "set_matter_context", "record_skill_test", "revise_skill", "propose_redline", "add_contract_comment", "create_assignment", "insert_library_clause", "assemble_template", "apply_playbook"}
 WORD_RE = re.compile(r"[\w]+(?:[’'-][\w]+)*", re.UNICODE)
 CITATION_RE = re.compile(r"\[\[cite:(\d+)\|(.+?)\]\]", re.DOTALL | re.IGNORECASE)
 SKILL_REQUEST_RE = re.compile(r"\b(create|build|make|draft|design|improve|edit|want|need)\b.{0,40}\bskill\b|\bskill\b.{0,40}\b(create|builder|creator)\b", re.IGNORECASE)
@@ -30,6 +31,12 @@ TOOL_DEFINITIONS = [
     {"type": "function", "function": {"name": "set_matter_context", "description": "Propose remembering multiple contracts and a concise factual summary for this conversation. Human confirmation is required.", "parameters": {"type": "object", "properties": {"contract_ids": {"type": "array", "items": {"type": "string"}, "maxItems": 20}, "summary": {"type": "string"}}, "required": ["contract_ids", "summary"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "record_skill_test", "description": "Propose recording a skill test against an example contract after showing the observed output and evidence. Human confirmation is required.", "parameters": {"type": "object", "properties": {"skill_id": {"type": "string"}, "contract_id": {"type": "string"}, "prompt": {"type": "string"}, "expected_outcome": {"type": "string"}, "observed_output": {"type": "string"}, "verdict": {"type": "string", "enum": ["pass", "fail", "needs_review"]}}, "required": ["skill_id", "contract_id", "prompt", "expected_outcome", "observed_output", "verdict"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "revise_skill", "description": "Propose a complete new immutable version of an existing skill after discussing or testing it. Human confirmation is required.", "parameters": {"type": "object", "properties": {"skill_id": {"type": "string"}, "name": {"type": "string"}, "description": {"type": "string"}, "jurisdiction": {"type": "string"}, "instructions": {"type": "string"}}, "required": ["skill_id", "name", "description", "jurisdiction", "instructions"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "propose_redline", "description": "Propose an insert, replacement, or deletion redline for a draft/review contract. This creates a reviewable redline, never silently edits wording.", "parameters": {"type": "object", "properties": {"contract_id": {"type": "string"}, "block_id": {"type": "string"}, "operation": {"type": "string", "enum": ["insert", "replace", "delete"]}, "proposed_text": {"type": "string"}, "rationale": {"type": "string"}}, "required": ["contract_id", "operation", "proposed_text", "rationale"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "add_contract_comment", "description": "Propose a visible contract review comment for confirmation.", "parameters": {"type": "object", "properties": {"contract_id": {"type": "string"}, "block_id": {"type": "string"}, "body": {"type": "string"}}, "required": ["contract_id", "body"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "create_assignment", "description": "Propose assigning a contract review task to a workspace user ID for confirmation.", "parameters": {"type": "object", "properties": {"contract_id": {"type": "string"}, "title": {"type": "string"}, "description": {"type": "string"}, "assigned_to": {"type": "string"}, "due_date": {"type": "string"}}, "required": ["contract_id", "title", "assigned_to"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "insert_library_clause", "description": "Propose inserting a preferred or fallback library clause into a draft/review contract and saving a version.", "parameters": {"type": "object", "properties": {"contract_id": {"type": "string"}, "clause_id": {"type": "string"}, "use_fallback": {"type": "boolean"}}, "required": ["contract_id", "clause_id", "use_fallback"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "assemble_template", "description": "Propose assembling a new draft contract from a workspace template.", "parameters": {"type": "object", "properties": {"template_id": {"type": "string"}, "title": {"type": "string"}, "reference": {"type": "string"}}, "required": ["template_id", "title"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "apply_playbook", "description": "Propose applying all preferred or fallback positions from a negotiation playbook to a draft/review contract.", "parameters": {"type": "object", "properties": {"contract_id": {"type": "string"}, "playbook_id": {"type": "string"}, "use_fallback": {"type": "boolean"}}, "required": ["contract_id", "playbook_id", "use_fallback"], "additionalProperties": False}}},
 ]
 
 
@@ -221,6 +228,15 @@ class AssistantService:
             tx.execute("INSERT INTO assistant_messages(id,organisation_id,thread_id,user_id,role,content,created_at) VALUES (?,?,?,?,?,?,?)", (new_id(), actor.organisation_id, thread_id, actor.user_id, "user", question, created))
             tx.execute("UPDATE assistant_threads SET title=?,updated_at=? WHERE id=? AND organisation_id=?", (question[:72], created, thread_id, actor.organisation_id))
 
+    def _drafting_catalog(self, actor: Actor) -> dict:
+        drafting = DraftingService()
+        return {
+            "clauses": [{"id": item["id"], "title": item["title"], "has_fallback": bool(item["fallback_body"])} for item in ContractService().clauses(actor)],
+            "templates": [{"id": item["id"], "name": item["name"]} for item in drafting.templates(actor)],
+            "playbooks": [{"id": item["id"], "name": item["name"]} for item in drafting.playbooks(actor)],
+            "members": get_database().rows("SELECT u.id,u.name FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.organisation_id=?", (actor.organisation_id,)),
+        }
+
     def stream(self, actor: Actor, thread_id: str, question: str, skill_id: str = "", contract_id: str = "") -> Iterator[dict]:
         self._thread(actor, thread_id)
         question = question.strip()
@@ -239,6 +255,7 @@ class AssistantService:
             receipt = {"tool": "load_skill", "label": f"Loaded {skill['name']}", "status": "complete", "detail": f"Version {skill['current_version']} · {skill['jurisdiction']}"}
             receipts.append(receipt)
             yield {"type": "activity", **receipt}
+        history.append({"role": "system", "content": "WORKSPACE DRAFTING CATALOG (tenant-scoped IDs):\n" + json.dumps(self._drafting_catalog(actor), ensure_ascii=False)})
         key, funding, reserved = authorize(actor.user_id)
         content, calls = "", []
         try:
@@ -290,6 +307,18 @@ class AssistantService:
             return f"Record {str(arguments.get('verdict', 'review'))} skill test"
         if name == "revise_skill":
             return f"Publish a new version of “{str(arguments.get('name', 'this skill'))[:120]}”"
+        if name == "propose_redline":
+            return f"Propose {str(arguments.get('operation', 'drafting'))} redline"
+        if name == "add_contract_comment":
+            return "Add a contract review comment"
+        if name == "create_assignment":
+            return f"Assign “{str(arguments.get('title', 'review task'))[:120]}”"
+        if name == "insert_library_clause":
+            return "Insert a library clause and save a version"
+        if name == "assemble_template":
+            return f"Assemble “{str(arguments.get('title', 'new contract'))[:120]}” from template"
+        if name == "apply_playbook":
+            return "Apply negotiation playbook and save a version"
         return f"Move contract to {str(arguments.get('target', 'the proposed state'))[:80]}"
 
     def _prompt_messages(self, question: str, sources: list[dict], skill: dict | None, history: list[dict]) -> list[dict]:
@@ -301,6 +330,7 @@ For every contract-specific factual claim, cite a short verbatim passage using e
 The quoted words must occur consecutively in that source. Never fabricate or paraphrase text inside a citation marker.
 If evidence is missing, say so. Keep quotations short and answers practical.
 Read/search work can happen immediately. Write tools only create visible proposals for later human confirmation.
+Drafting requests should use propose_redline, add_contract_comment, or create_assignment. Redlines remain separately reviewable and accepting one creates an immutable contract version.
 When creating a skill, converse first: establish purpose, triggers, inputs, workflow, output, boundaries, and an example. Do not invent legal positions. Call create_skill only when the draft is complete enough for review.
 When the user asks to test a selected skill, apply it to the selected example contract, show cited output, compare it with an explicit expected outcome, and use record_skill_test. If refinement is requested, discuss the change and use revise_skill with the complete replacement instructions; never silently overwrite a skill.
 When the user asks you to remember a matter involving several agreements, identify only available contract IDs and use set_matter_context with a concise factual summary. Saved matter memory and contract links require confirmation.
@@ -382,6 +412,18 @@ ACTIVE SKILL:
             elif row["tool_name"] == "revise_skill":
                 skill_id = str(args.pop("skill_id", ""))
                 SkillService().update(actor, skill_id, args)
+            elif row["tool_name"] == "propose_redline":
+                DraftingService().propose_redline(actor, str(args.get("contract_id", "")), str(args.get("operation", "")), str(args.get("proposed_text", "")), str(args.get("rationale", "")), str(args.get("block_id", "")))
+            elif row["tool_name"] == "add_contract_comment":
+                DraftingService().add_comment(actor, str(args.get("contract_id", "")), str(args.get("body", "")), str(args.get("block_id", "")))
+            elif row["tool_name"] == "create_assignment":
+                DraftingService().assign(actor, str(args.get("contract_id", "")), str(args.get("title", "")), str(args.get("assigned_to", "")), str(args.get("due_date", "")), str(args.get("description", "")))
+            elif row["tool_name"] == "insert_library_clause":
+                DraftingService().insert_clause(actor, str(args.get("contract_id", "")), str(args.get("clause_id", "")), bool(args.get("use_fallback")))
+            elif row["tool_name"] == "assemble_template":
+                DraftingService().assemble_template(actor, str(args.get("template_id", "")), {"title": str(args.get("title", "")), "reference": str(args.get("reference", ""))})
+            elif row["tool_name"] == "apply_playbook":
+                DraftingService().apply_playbook(actor, str(args.get("contract_id", "")), str(args.get("playbook_id", "")), bool(args.get("use_fallback")))
             else:
                 raise ValueError("Unsupported proposal")
         except Exception as exc:

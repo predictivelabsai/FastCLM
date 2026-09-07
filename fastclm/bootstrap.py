@@ -7,6 +7,7 @@ from fastclm.database import get_database
 from fastclm.security import token
 from fastclm.services.contracts import ContractService
 from fastclm.services.documents import DocumentService
+from fastclm.services.drafting import DraftingService
 from fastclm.services.identity import IdentityService
 from fastclm.services.assistant import AssistantService
 
@@ -89,6 +90,9 @@ def ensure_demo() -> tuple[dict, dict]:
     service.transition(actor, msa["id"], "active")
     service.add_obligation(actor, msa["id"], {"title": "Quarterly service review", "description": "Review uptime, incidents, and service credits.", "due_date": (today + timedelta(days=12)).isoformat(), "recurrence": "quarterly"})
     service.add_obligation(actor, msa["id"], {"title": "Decide renewal", "description": "Confirm renewal or issue notice before the contractual deadline.", "due_date": (today + timedelta(days=60)).isoformat(), "recurrence": "none"})
+    drafting = DraftingService()
+    drafting.add_comment(actor, msa["id"], "Confirm the renewal position with the service owner before the notice window.", mention_user_ids=[actor.user_id])
+    drafting.assign(actor, msa["id"], "Prepare renewal recommendation", actor.user_id, (today + timedelta(days=45)).isoformat(), "Compare service performance and the negotiated notice position.")
 
     dpa = service.create(actor, {
         "title": "EU data processing agreement", "reference": "CLM-2026-002", "contract_type": "Data processing agreement",
@@ -99,5 +103,11 @@ def ensure_demo() -> tuple[dict, dict]:
     service.add_block(actor, dpa["id"], "clause", "The agreement is governed by German law and may be terminated if the main services agreement ends.")
     service.snapshot(actor, dpa["id"], "Internal review draft")
     service.transition(actor, dpa["id"], "review")
+    starter_clauses = service.clauses(actor)[:3]
+    drafting.create_template(actor, {
+        "name": "UK services starter", "contract_type": "Master services agreement", "jurisdiction": "England and Wales",
+        "blocks": [{"block_type": "clause", "content": item["body"]} for item in starter_clauses],
+    })
+    drafting.create_playbook(actor, {"name": "SME commercial positions", "clause_ids": [item["id"] for item in starter_clauses]})
     AssistantService().seed_demo(actor, msa["id"])
     return user, organisation

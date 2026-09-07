@@ -154,6 +154,8 @@ textarea { resize: vertical; line-height: 1.55; }
 .table-row h3, .table-row h4 { margin: 0; font-size: 14px; }
 .table-row p { margin: 4px 0 0; font-size: 12px; }
 .identity-copy { display: grid; gap: 3px; }
+.assignment-card { padding: 14px 16px; display: grid; gap: 12px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.assignment-card .inline-actions { justify-content: space-between; }
 .table-meta { text-align: right; }
 .empty { padding: 42px 24px; border: 1px dashed #cfd4dc; border-radius: 14px; text-align: center; background: rgba(255,255,255,.5); }
 .empty h3 { margin: 0 0 7px; }

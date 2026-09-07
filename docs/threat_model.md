@@ -35,6 +35,12 @@ tokens, invitation links, SCIM identity mappings, and audit history.
 - **Untraceable skill changes:** conversational tests preserve the tested skill
   version and example contract, while refinements append an attributable
   immutable version only after confirmation.
+- **Silent negotiated-text changes:** redline proposal and acceptance are
+  separate audited actions; accepted wording, library insertion, templates,
+  and playbooks append immutable versions rather than replacing history.
+- **Cross-tenant collaboration:** block references, mentioned users,
+  assignees, template clauses, and playbook clauses are revalidated against the
+  active organisation at the service boundary.
 - **Secret exposure:** environment-only fleet secrets and encrypted per-user
   BYOK values that are never returned to the browser.
 - **Abusive model spend:** atomic five-query allowance and BYOK preference.

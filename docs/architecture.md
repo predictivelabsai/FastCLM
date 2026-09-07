@@ -16,6 +16,8 @@ Word / PDF ─ extraction ──────┼─ immutable contract versions
        │ OCR + scan            ├─ local / S3-compatible source objects
        └ page provenance       ├─ retention + encrypted tenant backups
                               ├─ versioned Markdown skills
+                              ├─ redlines + collaborative review work
+                              ├─ templates + fallback playbooks
                               ├─ deterministic / xAI review
                               ├─ Postmark reminder runner
                               └─ DocuSign / SignWell adapter drafts
@@ -107,6 +109,16 @@ in later prompts. A selected skill can be exercised against an example
 contract in conversation; confirmed test records preserve the skill version,
 expected and observed outcomes, and verdict. Refinement creates a new immutable
 skill version rather than rewriting test history.
+
+## Collaborative drafting
+
+Clause-library insertion and accepted redlines are restricted to draft/review
+contracts and immediately append a checksummed version. Redline proposals keep
+original and proposed wording plus a deterministic unified diff; proposing and
+accepting are separate audited decisions. Comments, tenant-validated mentions,
+and assignments remain business records after resolution or completion.
+Templates assemble ordered blocks into a new draft, while negotiation
+playbooks group preferred clauses and their explicit fallbacks.
 
 ## External actions
 

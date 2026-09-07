@@ -48,6 +48,9 @@ Connect and a token-gated integration API are optional.
 - Reviewed lifecycle transitions from draft through review, approval,
   signature, active, expiry, or termination.
 - Immutable text/file version history with SHA-256 integrity checks.
+- Collaborative clause insertion, reviewable before/after redlines, comments,
+  workspace mentions, assigned review work, template assembly, and negotiation
+  playbooks with preferred and fallback positions.
 - Scanned-PDF OCR with page provenance, structural upload scanning with an
   optional ClamAV adapter, and local or S3-compatible encrypted object storage.
 - Opt-in attachment retention for completed contract lifecycles and

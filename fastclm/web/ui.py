@@ -369,7 +369,7 @@ def _editor(contract: dict, csrf: str, editable: bool):
     return Div(*blocks)
 
 
-def contract_detail_page(actor: Actor, contract: dict, counterparties: list[dict], csrf: str, usage: dict, notice: str = "") -> Html:
+def contract_detail_page(actor: Actor, contract: dict, counterparties: list[dict], drafting: dict, csrf: str, usage: dict, notice: str = "") -> Html:
     editable = actor.can("contracts.edit") and contract["status"] in {"draft", "review"}
     allowed_transitions = [target for target in contract["next_statuses"] if not (contract["status"] == "approval" and target == "signature")]
     transitions = [Form(Input(type="hidden", name="csrf", value=csrf), Input(type="hidden", name="target", value=target), Button(f"Move to {target.title()}", cls="button small"), action=f"/contracts/{contract['id']}/transition", method="post") for target in allowed_transitions] if actor.can("contracts.transition") else []
@@ -400,6 +400,17 @@ def contract_detail_page(actor: Actor, contract: dict, counterparties: list[dict
     for review in contract["findings"]:
         for item in json.loads(review["findings_json"]):
             findings.append(Div(Div(H4(item.get("title", "Review point")), status_badge(item.get("severity", "medium")), cls="subhead"), P(item.get("guidance", "")), P(item.get("evidence", ""), cls="muted") if item.get("evidence") else None, cls="finding"))
+    redlines = [Div(
+        Div(Div(Strong(f"{item['operation'].title()} · {item['author_name'] or 'Former member'}"), P(item["rationale"] or "No rationale", cls="muted")), status_badge(item["status"]), cls="subhead"),
+        Pre(item["diff"] or item["proposed_text"], cls="proposal-draft"),
+        Div(
+            Form(Input(type="hidden", name="csrf", value=csrf), Input(type="hidden", name="decision", value="accept"), Button("Accept redline", cls="button small"), action=f"/redlines/{item['id']}/decision", method="post") if editable and item["status"] == "pending" else None,
+            Form(Input(type="hidden", name="csrf", value=csrf), Input(type="hidden", name="decision", value="reject"), Button("Reject", cls="button secondary small"), action=f"/redlines/{item['id']}/decision", method="post") if editable and item["status"] == "pending" else None,
+            cls="inline-actions",
+        ), cls="finding",
+    ) for item in drafting["redlines"]]
+    comments = [Div(Div(Strong(item["author_name"] or "Former member"), P(item["body"]), Small(item["block_content"][:90] if item["block_content"] else "Contract-level comment")), Div(status_badge(item["status"]), Form(Input(type="hidden", name="csrf", value=csrf), Button("Resolve", cls="button secondary small"), action=f"/comments/{item['id']}/resolve", method="post") if item["status"] == "open" and actor.can("contracts.edit") else None, cls="inline-actions"), cls="table-row") for item in drafting["comments"]]
+    assignments = [Div(Div(Strong(item["title"]), Small(f"{item['assignee_name']} · {item['due_date'] or 'No due date'}"), cls="identity-copy"), Div(status_badge(item["status"]), Form(Input(type="hidden", name="csrf", value=csrf), Button("Complete", cls="button secondary small"), action=f"/assignments/{item['id']}/complete", method="post") if item["status"] == "open" and (item["assigned_to"] == actor.user_id or actor.can("contracts.edit")) else None, cls="inline-actions"), cls="assignment-card") for item in drafting["assignments"]]
     content = Div(
         Div(notice, cls="alert success") if notice else None,
         page_intro(contract["reference"], contract["title"], contract["summary"] or "No summary yet.", Div(status_badge(contract["status"]), status_badge(contract["risk_level"]), *transitions, cls="inline-actions")),
@@ -457,6 +468,19 @@ def contract_detail_page(actor: Actor, contract: dict, counterparties: list[dict
             ),
             cls="panel",
         ) if editable else None,
+        Section(
+            Div(H3("Collaborative drafting"), Span("Every accepted change creates an immutable version", cls="muted"), cls="subhead"),
+            Div(
+                Section(H4("Clause and playbook insertion"), Form(Input(type="hidden", name="csrf", value=csrf), Select(*[Option(f"{item['category']} · {item['title']}", value=item["id"]) for item in drafting["clauses"]], name="clause_id"), Label(Input(type="checkbox", name="fallback", value="true"), "Use negotiated fallback", cls="checkbox-label"), Button("Insert clause", cls="button small"), action=f"/contracts/{contract['id']}/clauses/insert", method="post", cls="form-stack") if editable else P("Insertion is locked at this lifecycle stage.", cls="muted"), Form(Input(type="hidden", name="csrf", value=csrf), Select(*[Option(item["name"], value=item["id"]) for item in drafting["playbooks"]], name="playbook_id"), Label(Input(type="checkbox", name="fallback", value="true"), "Apply fallback positions", cls="checkbox-label"), Button("Apply playbook", cls="button secondary small"), action=f"/contracts/{contract['id']}/playbooks/apply", method="post", cls="form-stack") if editable and drafting["playbooks"] else None, P(f"{len(drafting['templates'])} templates · {len(drafting['playbooks'])} negotiation playbooks", cls="muted"), cls="panel"),
+                Section(H4("Propose redline"), Form(Input(type="hidden", name="csrf", value=csrf), Select(Option("Insert new clause", value=""), *[Option(item["content"][:90], value=item["id"]) for item in contract["blocks"]], name="block_id"), Select(Option("Insert", value="insert"), Option("Replace", value="replace"), Option("Delete", value="delete"), name="operation"), Textarea(name="proposed_text", rows="3", placeholder="Proposed wording"), Input(name="rationale", placeholder="Negotiation rationale"), Button("Propose redline", cls="button small"), action=f"/contracts/{contract['id']}/redlines", method="post", cls="form-stack") if editable else None, *redlines, cls="panel"),
+                cls="two-column",
+            ),
+            Div(
+                Section(H4("Comments and mentions"), Div(*comments, cls="table-card") if comments else P("No comments yet.", cls="muted"), Form(Input(type="hidden", name="csrf", value=csrf), Textarea(name="body", rows="2", placeholder="Add a review comment…", required=True), Select(Option("No mention", value=""), *[Option(f"@{item['name']}", value=item["id"]) for item in drafting["members"]], name="mention_user_id"), Button("Comment", cls="button small"), action=f"/contracts/{contract['id']}/comments", method="post", cls="form-stack"), cls="panel"),
+                Section(H4("Assignments"), Div(*assignments, cls="table-card") if assignments else P("No assignments yet.", cls="muted"), Form(Input(type="hidden", name="csrf", value=csrf), Input(name="title", placeholder="Review task", required=True), Select(*[Option(item["name"], value=item["id"]) for item in drafting["members"]], name="assigned_to"), Input(type="date", name="due_date"), Button("Assign", cls="button small"), action=f"/contracts/{contract['id']}/assignments", method="post", cls="form-stack") if editable else None, cls="panel"),
+                cls="two-column",
+            ), cls="section-stack",
+        ),
         Div(
             Div(
                 Section(
@@ -500,10 +524,13 @@ def counterparties_page(actor: Actor, rows: list[dict], csrf: str, error: str = 
     return shell(actor, "counterparties", "Counterparties", content)
 
 
-def clauses_page(actor: Actor, rows: list[dict], csrf: str, error: str = "") -> Html:
+def clauses_page(actor: Actor, rows: list[dict], templates: list[dict], playbooks: list[dict], csrf: str, error: str = "") -> Html:
     items = [Article(Div(P(item["category"], cls="eyebrow"), status_badge(item["jurisdiction"]), cls="subhead"), H3(item["title"]), P(item["body"]), P(Strong("Review guidance: "), item["risk_guidance"], cls="muted") if item["risk_guidance"] else None, cls="panel") for item in rows]
     form = Form(Input(type="hidden", name="csrf", value=csrf), Label("Title", Input(name="title", required=True)), Div(Label("Category", Input(name="category", value="General")), Label("Jurisdiction", Input(name="jurisdiction", value="UK / EU")), cls="form-row"), Label("Preferred wording", Textarea(name="body", rows="5", required=True)), Label("Fallback wording", Textarea(name="fallback_body", rows="3")), Label("Review guidance", Textarea(name="risk_guidance", rows="2")), Button("Add clause", cls="button"), action="/clauses", method="post", cls="panel form-stack") if actor.can("clauses.manage") else None
-    content = Div(page_intro("CLAUSE LIBRARY", "Reusable UK and EU drafting knowledge", "Use preferred language, fallbacks, and review notes as a starting point—not jurisdiction-specific legal advice."), Div(error, cls="alert error") if error else None, Div(Div(*items, cls="section-stack"), form, cls="two-column"), cls="page-scroll")
+    template_rows = [Div(Div(Strong(item["name"]), Small(f"{item['contract_type']} · {item['jurisdiction']}")), Form(Input(type="hidden", name="csrf", value=csrf), Input(name="title", placeholder="New contract title", required=True), Button("Assemble", cls="button small"), action=f"/templates/{item['id']}/assemble", method="post", cls="inline-actions"), cls="table-row") for item in templates]
+    playbook_rows = [Div(Div(Strong(item["name"]), Small(f"{item['contract_type']} · {item['jurisdiction']}")), status_badge("active"), cls="table-row") for item in playbooks]
+    tools = Section(H3("Templates and negotiation playbooks"), P("Assemble repeatable first drafts or group preferred clauses with their negotiated fallbacks.", cls="muted"), Div(*template_rows, cls="table-card") if template_rows else None, Div(*playbook_rows, cls="table-card") if playbook_rows else None, Form(Input(type="hidden", name="csrf", value=csrf), Input(name="name", placeholder="Template name", required=True), Select(*[Option(item["title"], value=item["id"]) for item in rows], name="clause_ids", multiple=True, required=True), Button("Create template", cls="button small"), action="/templates", method="post", cls="form-stack") if actor.can("clauses.manage") else None, Form(Input(type="hidden", name="csrf", value=csrf), Input(name="name", placeholder="Playbook name", required=True), Select(*[Option(item["title"], value=item["id"]) for item in rows], name="clause_ids", multiple=True, required=True), Button("Create playbook", cls="button secondary small"), action="/playbooks", method="post", cls="form-stack") if actor.can("clauses.manage") else None, cls="panel form-stack")
+    content = Div(page_intro("CLAUSE LIBRARY", "Reusable UK and EU drafting knowledge", "Use preferred language, fallbacks, and review notes as a starting point—not jurisdiction-specific legal advice."), Div(error, cls="alert error") if error else None, Div(Div(*items, cls="section-stack"), form, cls="two-column"), tools, cls="page-scroll")
     return shell(actor, "clauses", "Clause library", content)
 
 

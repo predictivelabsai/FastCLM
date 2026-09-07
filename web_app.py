@@ -30,6 +30,7 @@ from fastclm.services.backups import BackupService
 from fastclm.services.contracts import ContractService
 from fastclm.services.credentials import clear_xai_key, key_status, store_xai_key, usage
 from fastclm.services.documents import DocumentService
+from fastclm.services.drafting import DraftingService
 from fastclm.services.identity import IdentityService
 from fastclm.services.review import ReviewService
 from fastclm.services.retention import RetentionService
@@ -142,6 +143,7 @@ def _contract_page(request, contract_id: str, notice: str = ""):
         actor,
         contract,
         service.counterparties(actor),
+        DraftingService().workspace(actor, contract_id),
         request.session["csrf_token"],
         usage(actor.user_id),
         notice,
@@ -529,6 +531,89 @@ async def block_update(request, contract_id: str, block_id: str):
     return RedirectResponse(f"/contracts/{contract_id}?notice={quote(message)}", status_code=303)
 
 
+@rt("/contracts/{contract_id}/clauses/insert", methods=["POST"])
+async def clause_insert(request, contract_id: str):
+    actor, data = await _form(request, "contracts.edit")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        DraftingService().insert_clause(actor, contract_id, str(data.get("clause_id", "")), str(data.get("fallback", "")) == "true")
+        message = "Clause inserted and version saved"
+    except Exception as exc:
+        message = str(exc)
+    return RedirectResponse(f"/contracts/{contract_id}?notice={quote(message)}", status_code=303)
+
+
+@rt("/contracts/{contract_id}/redlines", methods=["POST"])
+async def redline_propose(request, contract_id: str):
+    actor, data = await _form(request, "contracts.edit")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        DraftingService().propose_redline(actor, contract_id, str(data.get("operation", "")), str(data.get("proposed_text", "")), str(data.get("rationale", "")), str(data.get("block_id", "")))
+        message = "Redline proposed for review"
+    except Exception as exc:
+        message = str(exc)
+    return RedirectResponse(f"/contracts/{contract_id}?notice={quote(message)}", status_code=303)
+
+
+@rt("/redlines/{redline_id}/decision", methods=["POST"])
+async def redline_decide(request, redline_id: str):
+    actor, data = await _form(request, "contracts.edit")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        item = DraftingService().decide_redline(actor, redline_id, str(data.get("decision", "")) == "accept")
+        return RedirectResponse(f"/contracts/{item['contract_id']}?notice=Redline+decided", status_code=303)
+    except Exception as exc:
+        return RedirectResponse(f"/contracts?notice={quote(str(exc))}", status_code=303)
+
+
+@rt("/contracts/{contract_id}/comments", methods=["POST"])
+async def contract_comment(request, contract_id: str):
+    actor, data = await _form(request, "contracts.view")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        mention = str(data.get("mention_user_id", ""))
+        DraftingService().add_comment(actor, contract_id, str(data.get("body", "")), mention_user_ids=[mention] if mention else [])
+        message = "Comment added"
+    except Exception as exc:
+        message = str(exc)
+    return RedirectResponse(f"/contracts/{contract_id}?notice={quote(message)}", status_code=303)
+
+
+@rt("/contracts/{contract_id}/assignments", methods=["POST"])
+async def contract_assignment(request, contract_id: str):
+    actor, data = await _form(request, "contracts.edit")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        DraftingService().assign(actor, contract_id, str(data.get("title", "")), str(data.get("assigned_to", "")), str(data.get("due_date", "")))
+        message = "Review task assigned"
+    except Exception as exc:
+        message = str(exc)
+    return RedirectResponse(f"/contracts/{contract_id}?notice={quote(message)}", status_code=303)
+
+
+@rt("/comments/{comment_id}/resolve", methods=["POST"])
+async def comment_resolve(request, comment_id: str):
+    actor, _ = await _form(request, "contracts.edit")
+    if isinstance(actor, Response):
+        return actor
+    item = DraftingService().resolve_comment(actor, comment_id)
+    return RedirectResponse(f"/contracts/{item['contract_id']}?notice=Comment+resolved", status_code=303)
+
+
+@rt("/assignments/{assignment_id}/complete", methods=["POST"])
+async def assignment_complete(request, assignment_id: str):
+    actor, _ = await _form(request)
+    if isinstance(actor, Response):
+        return actor
+    item = DraftingService().complete_assignment(actor, assignment_id)
+    return RedirectResponse(f"/contracts/{item['contract_id']}?notice=Assignment+completed", status_code=303)
+
+
 @rt("/contracts/{contract_id}/versions", methods=["POST"])
 async def version_create(request, contract_id: str):
     actor, data = await _form(request, "contracts.edit")
@@ -716,11 +801,12 @@ async def counterparty_create(request):
 
 
 @rt("/clauses", methods=["GET"])
-def clauses(request):
+def clauses(request, error: str = ""):
     actor = _required(request, "contracts.view")
     if isinstance(actor, Response):
         return actor
-    return clauses_page(actor, ContractService().clauses(actor), request.session["csrf_token"])
+    drafting = DraftingService()
+    return clauses_page(actor, ContractService().clauses(actor), drafting.templates(actor), drafting.playbooks(actor), request.session["csrf_token"], error)
 
 
 @rt("/clauses", methods=["POST"])
@@ -732,7 +818,62 @@ async def clause_create(request):
         ContractService().add_clause(actor, dict(data))
         return RedirectResponse("/clauses", status_code=303)
     except Exception as exc:
-        return clauses_page(actor, ContractService().clauses(actor), request.session["csrf_token"], str(exc))
+        drafting = DraftingService()
+        return clauses_page(actor, ContractService().clauses(actor), drafting.templates(actor), drafting.playbooks(actor), request.session["csrf_token"], str(exc))
+
+
+@rt("/templates", methods=["POST"])
+async def template_create(request):
+    actor, data = await _form(request, "clauses.manage")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        clause_ids = data.getlist("clause_ids")
+        clauses_by_id = {item["id"]: item for item in ContractService().clauses(actor)}
+        blocks = [{"block_type": "clause", "content": clauses_by_id[item]["body"]} for item in clause_ids if item in clauses_by_id]
+        DraftingService().create_template(actor, {"name": str(data.get("name", "")), "blocks": blocks})
+        message = "Contract template created"
+    except Exception as exc:
+        message = str(exc)
+    return RedirectResponse(f"/clauses?error={quote(message)}", status_code=303)
+
+
+@rt("/playbooks", methods=["POST"])
+async def playbook_create(request):
+    actor, data = await _form(request, "clauses.manage")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        DraftingService().create_playbook(actor, {"name": str(data.get("name", "")), "clause_ids": data.getlist("clause_ids")})
+        message = "Negotiation playbook created"
+    except Exception as exc:
+        message = str(exc)
+    return RedirectResponse(f"/clauses?error={quote(message)}", status_code=303)
+
+
+@rt("/templates/{template_id}/assemble", methods=["POST"])
+async def template_assemble(request, template_id: str):
+    actor, data = await _form(request, "contracts.edit")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        contract = DraftingService().assemble_template(actor, template_id, {"title": str(data.get("title", ""))})
+        return RedirectResponse(f"/contracts/{contract['id']}?notice=Contract+assembled+from+template", status_code=303)
+    except Exception as exc:
+        return RedirectResponse(f"/clauses?error={quote(str(exc))}", status_code=303)
+
+
+@rt("/contracts/{contract_id}/playbooks/apply", methods=["POST"])
+async def playbook_apply(request, contract_id: str):
+    actor, data = await _form(request, "contracts.edit")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        DraftingService().apply_playbook(actor, contract_id, str(data.get("playbook_id", "")), str(data.get("fallback", "")) == "true")
+        message = "Negotiation playbook applied and version saved"
+    except Exception as exc:
+        message = str(exc)
+    return RedirectResponse(f"/contracts/{contract_id}?notice={quote(message)}", status_code=303)
 
 
 @rt("/skills", methods=["GET"])

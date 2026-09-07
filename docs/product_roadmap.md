@@ -38,11 +38,12 @@ Updated: 2026-09-07
 - Page- and character-anchored citation verification, confirmation-gated
   multi-contract matter memory, and conversational skill tests/refinements
   against example agreements with attributable results and versions.
+- Clause and fallback insertion, reviewable redline diffs, comments and member
+  mentions, review assignments, template-based first drafts, and reusable
+  negotiation playbooks; accepted wording always creates a version.
 
 ## Next production increments
 
-- Clause insertion, redlining/diff, comments, mentions, assignments, template
-  assembly, and negotiated fallback playbooks.
 - Configurable multi-stage approval policies with delegation and separation of
   duties.
 - Explicitly confirmed SignWell/DocuSign dispatch, webhook signature
