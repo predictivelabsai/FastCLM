@@ -1,13 +1,13 @@
 # FastCLM architecture
 
 FastCLM is a modular monolith. FastHTML renders the public site and private
-workspace, application services enforce tenant and lifecycle rules, SQLite
-stores authoritative records, and a mounted FastAPI app exposes a private
+workspace, application services enforce tenant and lifecycle rules, SQLite or
+PostgreSQL stores authoritative records, and a mounted FastAPI app exposes a private
 integration surface.
 
 ```text
 FastHTML AI cockpit ─┐
-                     ├─ services ─ transaction boundary ─ SQLite
+                     ├─ services ─ transaction boundary ─ SQLite / PostgreSQL
 FastAPI /api ─────────┘       │
                               ├─ conversations + durable tool receipts
                               ├─ page/character citations + proposed actions
@@ -19,12 +19,23 @@ Word / PDF ─ extraction ──────┼─ immutable contract versions
                               ├─ redlines + collaborative review work
                               ├─ staged approval runs + delegation evidence
                               ├─ templates + fallback playbooks
+                              ├─ checksum-bound counsel review evidence
                               ├─ deterministic / xAI review
                               ├─ Postmark templates + escalation runner
                               └─ DocuSign / SignWell execution + evidence
 
 SCIM /scim/v2 ─ bearer + organisation ─ memberships + audit
+Health / metrics ─ database probe + privacy-safe HTTP counters/logs
 ```
+
+The repository adapter preserves the same parameterised service queries on
+both dialects. Migrations are numbered once, with a PostgreSQL override only
+where the implementation must be dialect-native. Contract search uses FTS5 on
+SQLite and a weighted generated `tsvector` plus GIN index on PostgreSQL; both
+apply the active organisation before returning ranked contract identifiers.
+HTTP metrics deliberately use only method and status labels, avoiding tenant,
+contract, path, and query-string cardinality. Structured request logs use the
+matched route template and request ID, never the URL query or request body.
 
 ## Trust boundaries
 
@@ -125,6 +136,21 @@ accepting are separate audited decisions. Comments, tenant-validated mentions,
 and assignments remain business records after resolution or completion.
 Templates assemble ordered blocks into a new draft, while negotiation
 playbooks group preferred clauses and their explicit fallbacks.
+
+## Legal content governance
+
+The bundled UK/EU clauses are generic scaffolding and start unreviewed. A
+workspace may create a review request naming the exact clauses, jurisdiction,
+scope, and intended reviewer. When a real external decision returns, an owner,
+admin, or legal member records the lawyer's identity, organisation,
+qualification, jurisdiction, decision, scope notes, and a controlled evidence
+reference, with an explicit qualification attestation. The immutable evidence
+row binds to a SHA-256 checksum of the preferred wording, fallback, and review
+guidance. Current status is derived from that checksum, so later wording cannot
+inherit an older approval. FastCLM records this evidence; it does not verify a
+professional register or turn generic content into legal advice by itself.
+The assistant sees review status and may propose a scoped review request, but
+only the direct evidence workflow can record a returned counsel decision.
 
 ## External actions
 

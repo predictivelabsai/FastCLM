@@ -5,6 +5,7 @@ import json
 import hmac
 import hashlib
 import re
+import time
 from urllib.parse import quote
 
 from dotenv import load_dotenv
@@ -22,6 +23,7 @@ from fastclm.bootstrap import ensure_demo, initialize
 from fastclm.config import settings
 from fastclm.database import get_database
 from fastclm.emailer import send_account_action
+from fastclm.observability import ObservabilityMiddleware, http_metrics
 from fastclm.reminders import start_scheduler, stop_scheduler
 from fastclm.security import Actor, csrf_valid, token
 from fastclm.services.audit import AuditService
@@ -57,6 +59,7 @@ from fastclm.web.ui import (
     skill_detail_page,
     skills_page,
     invitation_page,
+    legal_content_page,
     team_page,
     recovery_page,
 )
@@ -64,6 +67,7 @@ from web.api import api
 from web.developer import developer_page
 from web.landing import landing_page
 from web.seo import register_seo_routes
+from fastclm.services.legal_content import LegalContentService
 
 
 app, rt = fast_app(
@@ -76,6 +80,7 @@ app, rt = fast_app(
 )
 app.mount("/static", StaticFiles(directory=settings.root / "static"), name="static")
 app.mount("/api", api)
+app.add_middleware(ObservabilityMiddleware)
 
 
 async def _favicon(_request):
@@ -1007,6 +1012,42 @@ async def clause_create(request):
         return clauses_page(actor, ContractService().clauses(actor), drafting.templates(actor), drafting.playbooks(actor), request.session["csrf_token"], str(exc))
 
 
+@rt("/legal-content", methods=["GET"])
+def legal_content(request, error: str = "", notice: str = ""):
+    actor = _required(request, "contracts.view")
+    if isinstance(actor, Response):
+        return actor
+    return legal_content_page(actor, LegalContentService().overview(actor), request.session["csrf_token"], error, notice)
+
+
+@rt("/legal-content/requests", methods=["POST"])
+async def legal_content_request(request):
+    actor, data = await _form(request, "clauses.manage")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        payload = dict(data)
+        payload["clause_ids"] = data.getlist("clause_ids")
+        LegalContentService().request_review(actor, payload)
+        message = "Counsel review request created"
+        return RedirectResponse(f"/legal-content?notice={quote(message)}", status_code=303)
+    except Exception as exc:
+        return RedirectResponse(f"/legal-content?error={quote(str(exc))}", status_code=303)
+
+
+@rt("/legal-content/reviews", methods=["POST"])
+async def legal_content_review(request):
+    actor, data = await _form(request, "clauses.manage")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        LegalContentService().record_review(actor, dict(data))
+        message = "Counsel decision recorded against the exact clause wording"
+        return RedirectResponse(f"/legal-content?notice={quote(message)}", status_code=303)
+    except Exception as exc:
+        return RedirectResponse(f"/legal-content?error={quote(str(exc))}", status_code=303)
+
+
 @rt("/templates", methods=["POST"])
 async def template_create(request):
     actor, data = await _form(request, "clauses.manage")
@@ -1388,8 +1429,10 @@ def swagger_schema():
 
 @rt("/healthz")
 def healthz():
+    started = time.monotonic()
+    database = get_database()
     try:
-        migrations = int(get_database().scalar("SELECT COUNT(*) FROM schema_migrations") or 0)
+        migrations = int(database.scalar("SELECT COUNT(*) FROM schema_migrations") or 0)
         database_status = "ok"
     except Exception:
         migrations, database_status = 0, "error"
@@ -1398,7 +1441,12 @@ def healthz():
         "product": "FastCLM",
         "version": __version__,
         "environment": settings.environment,
-        "database": {"status": database_status, "dialect": "sqlite", "migrations": migrations},
+        "database": {
+            "status": database_status,
+            "dialect": database.dialect,
+            "migrations": migrations,
+            "latency_ms": round((time.monotonic() - started) * 1000, 3),
+        },
         "ai": {"provider": "xai", "model": settings.xai_model, "platform_key": "configured" if settings.xai_api_key else "disabled"},
         "email": "configured" if settings.postmark_api_token else "disabled",
         "scim": "configured" if settings.scim_token else "disabled",
@@ -1414,6 +1462,11 @@ def healthz():
             "docusign": "configured" if SignatureService().configured("docusign") else "disabled",
         },
     }, status_code=200 if database_status == "ok" else 503)
+
+
+@rt("/metrics")
+def metrics():
+    return PlainTextResponse(http_metrics.render(), media_type="text/plain; version=0.0.4; charset=utf-8")
 
 
 register_seo_routes(app)

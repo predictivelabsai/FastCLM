@@ -7,6 +7,7 @@ import pytest
 from fastclm.services.assistant import AssistantService, find_quote_anchor, verify_word_citations
 from fastclm.services.contracts import ContractService
 from fastclm.services.identity import IdentityService, new_id, now
+from fastclm.services.legal_content import LegalContentService
 from fastclm.services.skills import SkillService
 
 
@@ -156,6 +157,33 @@ def test_conversation_can_propose_and_confirm_a_new_skill(workspace, monkeypatch
     assert action["tool_name"] == "create_skill"
     AssistantService().decide(actor, action["id"], True)
     assert SkillService().by_slug(actor, "board-minutes-review")["current_version"] == 1
+
+
+def test_conversation_can_propose_scoped_counsel_review_without_claiming_approval(workspace, monkeypatch):
+    actor, _, _ = workspace
+    clause = ContractService().clauses(actor)[0]
+    monkeypatch.setattr("fastclm.services.assistant.authorize", lambda _user_id: ("key", "byok", False))
+
+    def fake_stream(_self, _key, _question, _sources, _skill, history):
+        assert clause["id"] in history[-1]["content"]
+        assert '"legal_review_status": "unreviewed"' in history[-1]["content"]
+        yield {"type": "token", "text": "I can prepare a scoped request; this does not approve the clause."}
+        yield {"type": "tool_start", "name": "request_legal_review"}
+        yield {"type": "tool_call", "name": "request_legal_review", "arguments": {
+            "scope": "Review preferred and fallback wording for SME service agreements.",
+            "jurisdiction": "England and Wales", "clause_ids": [clause["id"]],
+            "reviewer_name": "", "reviewer_email": "",
+        }}
+
+    monkeypatch.setattr(AssistantService, "_xai_stream", fake_stream)
+    thread = AssistantService().ensure_workspace(actor)
+    list(AssistantService().stream(actor, thread["id"], "Ask counsel to review our first clause"))
+    action = AssistantService().cockpit(actor, thread["id"])["messages"][-1]["actions"][0]
+    assert action["tool_name"] == "request_legal_review"
+    AssistantService().decide(actor, action["id"], True)
+    overview = LegalContentService().overview(actor)
+    assert overview["requests"][0]["status"] == "open"
+    assert overview["counts"]["approved"] == 0
 
 
 def test_confirmed_matter_memory_scopes_multi_contract_retrieval(workspace):

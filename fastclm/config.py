@@ -20,6 +20,7 @@ class Settings:
     environment: str
     data_dir: Path
     sqlite_path: Path
+    database_url: str
     upload_dir: Path
     storage_backend: str
     s3_bucket: str
@@ -78,6 +79,7 @@ class Settings:
             environment=os.getenv("FASTCLM_ENV_LABEL", "Local"),
             data_dir=data_dir,
             sqlite_path=Path(os.getenv("FASTCLM_DB", str(data_dir / "fastclm.sqlite"))),
+            database_url=os.getenv("FASTCLM_DATABASE_URL", os.getenv("DATABASE_URL", "")).strip(),
             upload_dir=Path(os.getenv("FASTCLM_UPLOAD_DIR", str(data_dir / "uploads"))),
             storage_backend=os.getenv("FASTCLM_STORAGE_BACKEND", "local").strip().lower(),
             s3_bucket=os.getenv("FASTCLM_S3_BUCKET", "").strip(),

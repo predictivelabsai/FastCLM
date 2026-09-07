@@ -18,6 +18,16 @@ blank secret. Generate `FASTCLM_SECRET`, `FASTCLM_API_TOKEN`, and
 and keep it in the same encrypted configuration inventory as the database.
 Never commit their values.
 
+SQLite remains the zero-service default. Set `FASTCLM_DATABASE_URL` to a
+`postgresql://` connection string to use PostgreSQL; the application applies
+the same numbered migrations and uses PostgreSQL-native weighted full-text
+search. This selects the authoritative database but does not copy existing
+SQLite data, so migrate records and attachments under a separately reviewed
+cutover plan before changing an established deployment. `/healthz` reports the
+active dialect, migration count, and probe latency. `/metrics` exposes only
+aggregate HTTP method/status counters and durations and is suitable for a
+private Prometheus scrape through the platform network.
+
 The default `FASTCLM_STORAGE_BACKEND=local` stores source objects and encrypted
 backups on the persistent `/data` volume. To use AWS S3 or a compatible object
 store, set the bucket, region, optional endpoint, credentials, and prefix shown

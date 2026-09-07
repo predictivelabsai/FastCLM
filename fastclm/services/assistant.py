@@ -15,10 +15,11 @@ from fastclm.services.contracts import ContractService
 from fastclm.services.credentials import authorize, refund
 from fastclm.services.drafting import DraftingService
 from fastclm.services.identity import new_id, now
+from fastclm.services.legal_content import LegalContentService
 from fastclm.services.skills import SkillService
 
 
-WRITE_TOOLS = {"create_contract", "add_obligation", "transition_contract", "create_skill", "set_matter_context", "record_skill_test", "revise_skill", "propose_redline", "add_contract_comment", "create_assignment", "insert_library_clause", "assemble_template", "apply_playbook"}
+WRITE_TOOLS = {"create_contract", "add_obligation", "transition_contract", "create_skill", "set_matter_context", "record_skill_test", "revise_skill", "propose_redline", "add_contract_comment", "create_assignment", "insert_library_clause", "assemble_template", "apply_playbook", "request_legal_review"}
 WORD_RE = re.compile(r"[\w]+(?:[’'-][\w]+)*", re.UNICODE)
 CITATION_RE = re.compile(r"\[\[cite:(\d+)\|(.+?)\]\]", re.DOTALL | re.IGNORECASE)
 SKILL_REQUEST_RE = re.compile(r"\b(create|build|make|draft|design|improve|edit|want|need)\b.{0,40}\bskill\b|\bskill\b.{0,40}\b(create|builder|creator)\b", re.IGNORECASE)
@@ -37,6 +38,7 @@ TOOL_DEFINITIONS = [
     {"type": "function", "function": {"name": "insert_library_clause", "description": "Propose inserting a preferred or fallback library clause into a draft/review contract and saving a version.", "parameters": {"type": "object", "properties": {"contract_id": {"type": "string"}, "clause_id": {"type": "string"}, "use_fallback": {"type": "boolean"}}, "required": ["contract_id", "clause_id", "use_fallback"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "assemble_template", "description": "Propose assembling a new draft contract from a workspace template.", "parameters": {"type": "object", "properties": {"template_id": {"type": "string"}, "title": {"type": "string"}, "reference": {"type": "string"}}, "required": ["template_id", "title"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "apply_playbook", "description": "Propose applying all preferred or fallback positions from a negotiation playbook to a draft/review contract.", "parameters": {"type": "object", "properties": {"contract_id": {"type": "string"}, "playbook_id": {"type": "string"}, "use_fallback": {"type": "boolean"}}, "required": ["contract_id", "playbook_id", "use_fallback"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "request_legal_review", "description": "Propose a scoped external counsel review request for exact library clauses and a qualified jurisdiction. This does not claim the wording is approved.", "parameters": {"type": "object", "properties": {"scope": {"type": "string"}, "jurisdiction": {"type": "string"}, "clause_ids": {"type": "array", "items": {"type": "string"}, "minItems": 1}, "reviewer_name": {"type": "string"}, "reviewer_email": {"type": "string"}}, "required": ["scope", "jurisdiction", "clause_ids"], "additionalProperties": False}}},
 ]
 
 
@@ -116,6 +118,17 @@ def verify_word_citations(answer: str, sources: list[dict]) -> tuple[str, list[d
     return clean, verified
 
 
+def _next_message_sequence(tx, thread_id: str, organisation_id: str) -> int:
+    row = tx.one(
+        "UPDATE assistant_threads SET next_message_sequence=next_message_sequence+1 "
+        "WHERE id=? AND organisation_id=? RETURNING next_message_sequence-1 AS sequence_number",
+        (thread_id, organisation_id),
+    )
+    if not row:
+        raise LookupError("Conversation not found")
+    return int(row["sequence_number"])
+
+
 class AssistantService:
     def ensure_workspace(self, actor: Actor) -> dict:
         SkillService().seed(actor.organisation_id, actor.user_id)
@@ -130,7 +143,8 @@ class AssistantService:
         )
         with get_database().transaction() as tx:
             tx.execute("INSERT INTO assistant_threads(id,organisation_id,created_by,title,created_at,updated_at) VALUES (?,?,?,?,?,?)", (thread_id, actor.organisation_id, actor.user_id, "Contract workspace", created, created))
-            tx.execute("INSERT INTO assistant_messages(id,organisation_id,thread_id,user_id,role,content,created_at) VALUES (?,?,?,?,?,?,?)", (new_id(), actor.organisation_id, thread_id, actor.user_id, "assistant", welcome, created))
+            sequence = _next_message_sequence(tx, thread_id, actor.organisation_id)
+            tx.execute("INSERT INTO assistant_messages(id,organisation_id,thread_id,user_id,role,content,sequence_number,created_at) VALUES (?,?,?,?,?,?,?,?)", (new_id(), actor.organisation_id, thread_id, actor.user_id, "assistant", welcome, sequence, created))
             AuditService().record(actor, "assistant_thread", thread_id, "assistant.thread.created", {}, tx)
         return get_database().one("SELECT * FROM assistant_threads WHERE id=?", (thread_id,))
 
@@ -151,10 +165,12 @@ class AssistantService:
             {"tool": "verify_citations", "label": "Verified source quotations", "status": "complete", "detail": "1 citation matched word for word"},
         ]
         with get_database().transaction() as tx:
-            tx.execute("INSERT INTO assistant_messages(id,organisation_id,thread_id,user_id,role,content,created_at) VALUES (?,?,?,?,?,?,?)", (user_message_id, actor.organisation_id, thread["id"], actor.user_id, "user", "What do I need to know before the Northstar renewal window?", created))
+            user_sequence = _next_message_sequence(tx, thread["id"], actor.organisation_id)
+            tx.execute("INSERT INTO assistant_messages(id,organisation_id,thread_id,user_id,role,content,sequence_number,created_at) VALUES (?,?,?,?,?,?,?,?)", (user_message_id, actor.organisation_id, thread["id"], actor.user_id, "user", "What do I need to know before the Northstar renewal window?", user_sequence, created))
+            answer_sequence = _next_message_sequence(tx, thread["id"], actor.organisation_id)
             tx.execute(
-                "INSERT INTO assistant_messages(id,organisation_id,thread_id,user_id,role,content,citations_json,funding_source,tool_runs_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (answer_id, actor.organisation_id, thread["id"], actor.user_id, "assistant", "Northstar renews automatically for another 12 months unless either party gives 60 days’ written notice [1]. The liability cap is the preceding 12 months’ fees, and UK GDPR processor terms apply where personal data is handled.\n\nI found a renewal decision deadline in 60 days. I can add it to the obligations register for you, subject to confirmation.", json.dumps(citations), "demo", json.dumps(receipts), created),
+                "INSERT INTO assistant_messages(id,organisation_id,thread_id,user_id,role,content,citations_json,funding_source,tool_runs_json,sequence_number,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (answer_id, actor.organisation_id, thread["id"], actor.user_id, "assistant", "Northstar renews automatically for another 12 months unless either party gives 60 days’ written notice [1]. The liability cap is the preceding 12 months’ fees, and UK GDPR processor terms apply where personal data is handled.\n\nI found a renewal decision deadline in 60 days. I can add it to the obligations register for you, subject to confirmation.", json.dumps(citations), "demo", json.dumps(receipts), answer_sequence, created),
             )
             tx.execute("INSERT INTO assistant_actions(id,organisation_id,thread_id,message_id,tool_name,summary,arguments_json,created_at) VALUES (?,?,?,?,?,?,?,?)", (new_id(), actor.organisation_id, thread["id"], answer_id, "add_obligation", "Track the Northstar renewal decision deadline", json.dumps({"contract_id": contract_id, "title": "Decide Northstar renewal", "description": "Confirm renewal or issue written notice before the contractual deadline.", "due_date": contract["notice_date"], "recurrence": "none"}), created))
             tx.execute("UPDATE assistant_threads SET title='Northstar renewal review',updated_at=? WHERE id=?", (created, thread["id"]))
@@ -167,7 +183,7 @@ class AssistantService:
             if not thread:
                 raise LookupError("Conversation not found")
         db = get_database()
-        messages = db.rows("SELECT * FROM assistant_messages WHERE thread_id=? AND organisation_id=? ORDER BY created_at,rowid", (thread["id"], actor.organisation_id))
+        messages = db.rows("SELECT * FROM assistant_messages WHERE thread_id=? AND organisation_id=? ORDER BY sequence_number", (thread["id"], actor.organisation_id))
         for message in messages:
             message["citations"] = json.loads(message["citations_json"] or "[]")
             message["tool_runs"] = json.loads(message.get("tool_runs_json") or "[]")
@@ -215,7 +231,7 @@ class AssistantService:
         return SkillService().by_slug(actor, "skill-creator") if SKILL_REQUEST_RE.search(f"{recent}\n{question}") else None
 
     def _history(self, actor: Actor, thread_id: str) -> list[dict]:
-        rows = get_database().rows("SELECT role,content FROM assistant_messages WHERE thread_id=? AND organisation_id=? ORDER BY created_at DESC,rowid DESC LIMIT 12", (thread_id, actor.organisation_id))
+        rows = get_database().rows("SELECT role,content FROM assistant_messages WHERE thread_id=? AND organisation_id=? ORDER BY sequence_number DESC LIMIT 12", (thread_id, actor.organisation_id))
         history = list(reversed(rows))
         thread = get_database().one("SELECT memory_summary FROM assistant_threads WHERE id=? AND organisation_id=?", (thread_id, actor.organisation_id))
         if thread and thread["memory_summary"]:
@@ -225,13 +241,16 @@ class AssistantService:
     def _record_user_message(self, actor: Actor, thread_id: str, question: str) -> None:
         created = now()
         with get_database().transaction() as tx:
-            tx.execute("INSERT INTO assistant_messages(id,organisation_id,thread_id,user_id,role,content,created_at) VALUES (?,?,?,?,?,?,?)", (new_id(), actor.organisation_id, thread_id, actor.user_id, "user", question, created))
+            sequence = _next_message_sequence(tx, thread_id, actor.organisation_id)
+            tx.execute("INSERT INTO assistant_messages(id,organisation_id,thread_id,user_id,role,content,sequence_number,created_at) VALUES (?,?,?,?,?,?,?,?)", (new_id(), actor.organisation_id, thread_id, actor.user_id, "user", question, sequence, created))
             tx.execute("UPDATE assistant_threads SET title=?,updated_at=? WHERE id=? AND organisation_id=?", (question[:72], created, thread_id, actor.organisation_id))
 
     def _drafting_catalog(self, actor: Actor) -> dict:
         drafting = DraftingService()
+        legal_content = LegalContentService().overview(actor)
         return {
-            "clauses": [{"id": item["id"], "title": item["title"], "has_fallback": bool(item["fallback_body"])} for item in ContractService().clauses(actor)],
+            "clauses": [{"id": item["id"], "title": item["title"], "has_fallback": bool(item["fallback_body"]), "legal_review_status": item["legal_review_status"]} for item in legal_content["clauses"]],
+            "open_legal_review_requests": [{"id": item["id"], "scope": item["scope"], "jurisdiction": item["jurisdiction"]} for item in legal_content["requests"] if item["status"] == "open"],
             "templates": [{"id": item["id"], "name": item["name"]} for item in drafting.templates(actor)],
             "playbooks": [{"id": item["id"], "name": item["name"]} for item in drafting.playbooks(actor)],
             "members": get_database().rows("SELECT u.id,u.name FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.organisation_id=?", (actor.organisation_id,)),
@@ -288,7 +307,8 @@ class AssistantService:
         answer = answer.strip()[:16000] or "I could not produce a grounded answer from the available sources."
         message_id, completed = new_id(), now()
         with get_database().transaction() as tx:
-            tx.execute("INSERT INTO assistant_messages(id,organisation_id,thread_id,user_id,role,content,citations_json,funding_source,tool_runs_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)", (message_id, actor.organisation_id, thread_id, actor.user_id, "assistant", answer, json.dumps(citations), funding, json.dumps(receipts), completed))
+            sequence = _next_message_sequence(tx, thread_id, actor.organisation_id)
+            tx.execute("INSERT INTO assistant_messages(id,organisation_id,thread_id,user_id,role,content,citations_json,funding_source,tool_runs_json,sequence_number,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)", (message_id, actor.organisation_id, thread_id, actor.user_id, "assistant", answer, json.dumps(citations), funding, json.dumps(receipts), sequence, completed))
             for proposal in proposals[:3]:
                 tx.execute("INSERT INTO assistant_actions(id,organisation_id,thread_id,message_id,tool_name,summary,arguments_json,created_at) VALUES (?,?,?,?,?,?,?,?)", (new_id(), actor.organisation_id, thread_id, message_id, proposal["name"], self._proposal_summary(proposal["name"], proposal["arguments"]), json.dumps(proposal["arguments"]), completed))
             AuditService().record(actor, "assistant_thread", thread_id, "assistant.answered", {"sources": [item["version_id"] for item in citations], "skill_id": skill["id"] if skill else "", "funding": funding, "verified_citations": verified_count, "proposals": [item["name"] for item in proposals]}, tx)
@@ -319,6 +339,8 @@ class AssistantService:
             return f"Assemble “{str(arguments.get('title', 'new contract'))[:120]}” from template"
         if name == "apply_playbook":
             return "Apply negotiation playbook and save a version"
+        if name == "request_legal_review":
+            return f"Request counsel review for {len(arguments.get('clause_ids', []))} library clause(s)"
         return f"Move contract to {str(arguments.get('target', 'the proposed state'))[:80]}"
 
     def _prompt_messages(self, question: str, sources: list[dict], skill: dict | None, history: list[dict]) -> list[dict]:
@@ -334,6 +356,7 @@ Drafting requests should use propose_redline, add_contract_comment, or create_as
 When creating a skill, converse first: establish purpose, triggers, inputs, workflow, output, boundaries, and an example. Do not invent legal positions. Call create_skill only when the draft is complete enough for review.
 When the user asks to test a selected skill, apply it to the selected example contract, show cited output, compare it with an explicit expected outcome, and use record_skill_test. If refinement is requested, discuss the change and use revise_skill with the complete replacement instructions; never silently overwrite a skill.
 When the user asks you to remember a matter involving several agreements, identify only available contract IDs and use set_matter_context with a concise factual summary. Saved matter memory and contract links require confirmation.
+When library wording needs jurisdiction-specific legal validation, use request_legal_review with the exact clause IDs, jurisdiction, and a bounded scope. Never describe unreviewed wording as approved and never fabricate counsel identity, qualification, or evidence.
 
 ACTIVE SKILL:
 {skill_text}"""
@@ -424,6 +447,8 @@ ACTIVE SKILL:
                 DraftingService().assemble_template(actor, str(args.get("template_id", "")), {"title": str(args.get("title", "")), "reference": str(args.get("reference", ""))})
             elif row["tool_name"] == "apply_playbook":
                 DraftingService().apply_playbook(actor, str(args.get("contract_id", "")), str(args.get("playbook_id", "")), bool(args.get("use_fallback")))
+            elif row["tool_name"] == "request_legal_review":
+                LegalContentService().request_review(actor, args)
             else:
                 raise ValueError("Unsupported proposal")
         except Exception as exc:
@@ -441,7 +466,8 @@ ACTIVE SKILL:
         thread_id, created = new_id(), now()
         with get_database().transaction() as tx:
             tx.execute("INSERT INTO assistant_threads(id,organisation_id,created_by,title,created_at,updated_at) VALUES (?,?,?,?,?,?)", (thread_id, actor.organisation_id, actor.user_id, title[:72], created, created))
-            tx.execute("INSERT INTO assistant_messages(id,organisation_id,thread_id,user_id,role,content,created_at) VALUES (?,?,?,?,?,?,?)", (new_id(), actor.organisation_id, thread_id, actor.user_id, "assistant", "What contracts and outcome should I remember for this matter?", created))
+            sequence = _next_message_sequence(tx, thread_id, actor.organisation_id)
+            tx.execute("INSERT INTO assistant_messages(id,organisation_id,thread_id,user_id,role,content,sequence_number,created_at) VALUES (?,?,?,?,?,?,?,?)", (new_id(), actor.organisation_id, thread_id, actor.user_id, "assistant", "What contracts and outcome should I remember for this matter?", sequence, created))
             AuditService().record(actor, "assistant_thread", thread_id, "assistant.thread.created", {"matter": True}, tx)
         return get_database().one("SELECT * FROM assistant_threads WHERE id=?", (thread_id,))
 

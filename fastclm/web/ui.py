@@ -117,6 +117,7 @@ NAV = (
     ("Notifications", "/notifications", "notifications", "contracts.view"),
     ("Counterparties", "/counterparties", "counterparties", "contracts.view"),
     ("Clause library", "/clauses", "clauses", "contracts.view"),
+    ("Legal reviews", "/legal-content", "legal_content", "contracts.view"),
     ("Skills library", "/skills", "skills", "assistant.use"),
     ("Team", "/team", "team", None),
     ("Audit trail", "/audit", "audit", "audit.view"),
@@ -570,6 +571,59 @@ def clauses_page(actor: Actor, rows: list[dict], templates: list[dict], playbook
     tools = Section(H3("Templates and negotiation playbooks"), P("Assemble repeatable first drafts or group preferred clauses with their negotiated fallbacks.", cls="muted"), Div(*template_rows, cls="table-card") if template_rows else None, Div(*playbook_rows, cls="table-card") if playbook_rows else None, Form(Input(type="hidden", name="csrf", value=csrf), Input(name="name", placeholder="Template name", required=True), Select(*[Option(item["title"], value=item["id"]) for item in rows], name="clause_ids", multiple=True, required=True), Button("Create template", cls="button small"), action="/templates", method="post", cls="form-stack") if actor.can("clauses.manage") else None, Form(Input(type="hidden", name="csrf", value=csrf), Input(name="name", placeholder="Playbook name", required=True), Select(*[Option(item["title"], value=item["id"]) for item in rows], name="clause_ids", multiple=True, required=True), Button("Create playbook", cls="button secondary small"), action="/playbooks", method="post", cls="form-stack") if actor.can("clauses.manage") else None, cls="panel form-stack")
     content = Div(page_intro("CLAUSE LIBRARY", "Reusable UK and EU drafting knowledge", "Use preferred language, fallbacks, and review notes as a starting point—not jurisdiction-specific legal advice."), Div(error, cls="alert error") if error else None, Div(Div(*items, cls="section-stack"), form, cls="two-column"), tools, cls="page-scroll")
     return shell(actor, "clauses", "Clause library", content)
+
+
+def legal_content_page(actor: Actor, data: dict, csrf: str, error: str = "", notice: str = "") -> Html:
+    counts = data["counts"]
+    clause_rows = [Div(
+        Div(Strong(item["title"]), Small(f"{item['category']} · {item['jurisdiction']}"), cls="identity-copy"),
+        status_badge(item["legal_review_status"]),
+        cls="table-row",
+    ) for item in data["clauses"]]
+    request_rows = [Div(
+        Div(Strong(item["scope"]), Small(f"{item['jurisdiction']} · {item['reviewer_name'] or item['reviewer_email'] or 'Reviewer not assigned'}"), cls="identity-copy"),
+        Div(status_badge(item["status"]), Small(item["created_at"]), cls="table-meta"),
+        cls="table-row",
+    ) for item in data["requests"]]
+    review_rows = [Div(
+        Div(Strong(item["clause_title"]), Small(f"{item['reviewed_jurisdiction']} · {item['reviewer_name']} · {item['reviewer_qualification']}"), Small(f"Evidence: {item['evidence_reference']}"), cls="identity-copy"),
+        Div(status_badge(item["decision"]), Small(item["reviewed_at"]), cls="table-meta"),
+        cls="table-row",
+    ) for item in data["reviews"]]
+    open_requests = [item for item in data["requests"] if item["status"] == "open"]
+    request_form = Form(
+        Input(type="hidden", name="csrf", value=csrf),
+        Label("Review scope", Textarea(name="scope", rows="3", placeholder="Describe the exact wording, use case, and limits counsel should review.", required=True)),
+        Label("Qualified jurisdiction", Input(name="jurisdiction", placeholder="England and Wales", required=True)),
+        Label("Clauses", Select(*[Option(item["title"], value=item["id"]) for item in data["clauses"]], name="clause_ids", multiple=True, required=True)),
+        Div(Label("Reviewer name", Input(name="reviewer_name")), Label("Reviewer email", Input(type="email", name="reviewer_email")), cls="form-row"),
+        Button("Create counsel review request", cls="button"),
+        action="/legal-content/requests", method="post", cls="panel form-stack",
+    ) if actor.can("clauses.manage") else None
+    record_form = Form(
+        Input(type="hidden", name="csrf", value=csrf),
+        Label("Clause", Select(*[Option(item["title"], value=item["id"]) for item in data["clauses"]], name="clause_id", required=True)),
+        Label("Related request", Select(Option("No related request", value=""), *[Option(f"{item['scope']} · {item['jurisdiction']}", value=item["id"]) for item in open_requests], name="request_id")),
+        Div(Label("Decision", Select(Option("Approved for stated scope", value="approved"), Option("Changes requested", value="changes_requested"), Option("Not approved", value="not_approved"), name="decision")), Label("Reviewed jurisdiction", Input(name="reviewed_jurisdiction", placeholder="England and Wales", required=True)), cls="form-row"),
+        Div(Label("Counsel name", Input(name="reviewer_name", required=True)), Label("Law firm / organisation", Input(name="reviewer_organisation", required=True)), cls="form-row"),
+        Label("Professional qualification and registration", Input(name="reviewer_qualification", placeholder="Solicitor, regulator and registration number", required=True)),
+        Label("Evidence reference", Input(name="evidence_reference", placeholder="Matter/file reference or controlled evidence URL", required=True)),
+        Label("Scope notes", Textarea(name="notes", rows="3", placeholder="Limits, assumptions, and changes required")),
+        Label(Input(type="checkbox", name="qualification_attested", value="true", required=True), "I attest that this decision was made by the named lawyer, qualified for the stated jurisdiction, and that the evidence reference can be produced.", cls="checkbox-label"),
+        Button("Record immutable counsel decision", cls="button"),
+        action="/legal-content/reviews", method="post", cls="panel form-stack",
+    ) if actor.can("clauses.manage") else None
+    content = Div(
+        page_intro("LEGAL CONTENT GOVERNANCE", "Prove which exact wording counsel reviewed", "Starter wording remains generic and unapproved until a real qualified lawyer's scoped decision and evidence are recorded."),
+        Div(error, cls="alert error") if error else None,
+        Div(notice, cls="alert success") if notice else None,
+        Div(stat("Current approved", counts["approved"]), stat("Needs attention", counts["attention"]), stat("Unreviewed", counts["unreviewed"]), cls="stats-grid"),
+        Section(H3("Clause review status"), P("Approval binds to a SHA-256 checksum of preferred wording, fallback wording, and guidance. Any later wording change makes the evidence stale.", cls="muted"), Div(*clause_rows, cls="table-card")),
+        Div(Section(H3("Request external review"), request_form, Div(*request_rows, cls="table-card") if request_rows else empty_state("No counsel requests", "Create a scoped request for the clauses and jurisdiction that need review.")), Section(H3("Record returned decision"), record_form), cls="two-column"),
+        Section(H3("Immutable decision evidence"), Div(*review_rows, cls="table-card") if review_rows else empty_state("No counsel decisions", "A recorded decision will show the reviewer, qualification, jurisdiction, wording checksum, and evidence reference.")),
+        cls="page-scroll",
+    )
+    return shell(actor, "legal_content", "Legal content governance", content)
 
 
 def audit_page(actor: Actor, rows: list[dict]) -> Html:

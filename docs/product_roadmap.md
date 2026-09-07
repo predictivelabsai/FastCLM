@@ -50,9 +50,19 @@ Updated: 2026-09-08
 - Per-user reminder opt-out, due-soon windows and overdue cadence; tenant-owned
   local/Postmark-alias templates; and auditable role/person escalation paths
   with retry-safe, one-time threshold delivery.
+- SQLite/PostgreSQL repository parity through a shared migration ledger and
+  dialect-native full-text indexes, verified against an isolated PostgreSQL 16
+  server; weighted organisation-scoped prefix search; database-aware health,
+  request IDs, privacy-safe structured request logs, and Prometheus counters.
+- Counsel-review governance with scoped clause/jurisdiction requests,
+  qualification attestation, immutable reviewer and evidence records, and
+  wording-checksum status that prevents an edited clause inheriting an older
+  decision; the assistant can prepare a request for confirmation but cannot
+  create counsel evidence or mark wording approved.
 
 ## Next production increments
 
-- PostgreSQL repository parity, full-text search, and observability.
 - Jurisdiction-specific legal content reviewed by qualified counsel. Current
-  UK/EU material is generic product scaffolding and not legal advice.
+  UK/EU material is generic product scaffolding and not legal advice. The
+  product workflow is ready, but actual external counsel review and evidence
+  must be supplied by the operator.

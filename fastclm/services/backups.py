@@ -45,13 +45,11 @@ class BackupService:
 
     def _tables(self, organisation_id: str) -> dict[str, list[dict]]:
         database = get_database()
-        names = database.rows(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('schema_migrations','organisation_backups') ORDER BY name"
-        )
         exported: dict[str, list[dict]] = {}
-        for item in names:
-            name = item["name"]
-            columns = {column["name"] for column in database.rows(f'PRAGMA table_info("{name}")')}
+        for name in database.table_names():
+            if name in {"schema_migrations", "organisation_backups", "contract_search"}:
+                continue
+            columns = database.column_names(name)
             if "organisation_id" in columns:
                 exported[name] = database.rows(f'SELECT * FROM "{name}" WHERE organisation_id=?', (organisation_id,))
         exported["organisations"] = database.rows("SELECT * FROM organisations WHERE id=?", (organisation_id,))

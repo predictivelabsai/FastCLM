@@ -16,10 +16,11 @@ append-only audit trail in one focused system.
 [contract record](screenshots/08-contract-record.png) ·
 [retention and backups](screenshots/14-settings-security.png) ·
 [signature execution](screenshots/16-signature-execution.png) ·
-[notification governance](screenshots/17-notification-governance.png)
+[notification governance](screenshots/17-notification-governance.png) ·
+[legal content governance](screenshots/18-legal-content-governance.png)
 
 The default installation needs no external services. It runs on FastHTML with
-SQLite, local authentication, deterministic synthetic demonstration data, and
+SQLite (or PostgreSQL via `FASTCLM_DATABASE_URL`), local authentication, deterministic synthetic demonstration data, and
 a conservative contract review that works without an AI key. Google OpenID
 Connect and a token-gated integration API are optional.
 
@@ -45,7 +46,7 @@ Connect and a token-gated integration API are optional.
   the same confirmed conversation.
 - Source-aware PDF.js side pane that opens the uploaded original and searches
   for the assistant's exact quoted evidence without leaving the conversation.
-- Contract register with search, status filters, counterparties, commercial
+- Contract register with weighted full-text/prefix search, status filters, counterparties, commercial
   value, dates, ownership, renewal terms, and risk level.
 - Reviewed lifecycle transitions from draft through review, approval,
   signature, active, expiry, or termination.
@@ -55,6 +56,10 @@ Connect and a token-gated integration API are optional.
 - Collaborative clause insertion, reviewable before/after redlines, comments,
   workspace mentions, assigned review work, template assembly, and negotiation
   playbooks with preferred and fallback positions.
+- Legal-content governance with scoped counsel requests, qualified-reviewer
+  attestation, immutable decision evidence, and checksum-bound approval status
+  that becomes stale if the reviewed wording changes. The assistant can prepare
+  a request for confirmation but cannot record or invent counsel approval.
 - Scanned-PDF OCR with page provenance, structural upload scanning with an
   optional ClamAV adapter, and local or S3-compatible encrypted object storage.
 - Opt-in attachment retention for completed contract lifecycles and
@@ -72,7 +77,7 @@ Connect and a token-gated integration API are optional.
   an audited obligation write, generated OpenAPI docs, and a committed schema.
 - Tenant-scoped SCIM 2.0 user provisioning with discovery, filtering,
   create/replace/patch/deactivate operations, and audited deprovisioning.
-- Responsive public landing page and workspace, health/SEO endpoints, Docker,
+- Responsive public landing page and workspace, health/Prometheus metrics/SEO endpoints, Docker,
   and Coolify-ready configuration for `clm.fastsme.com`.
 
 ## Run locally
@@ -108,6 +113,7 @@ Disable that route in production.
 - Obligations: `/obligations`
 - Counterparties: `/counterparties`
 - Clause library: `/clauses`
+- Legal content governance: `/legal-content`
 - Skills library: `/skills`
 - Team and invitations: `/team`
 - Audit trail: `/audit`
@@ -118,11 +124,13 @@ Disable that route in production.
 - Stable OpenAPI snapshot: `/swagger.json`
 - SCIM discovery: `/scim/v2/ServiceProviderConfig`
 - Health: `/healthz`
+- Prometheus metrics: `/metrics`
 
 ## Deployment
 
 The container listens on port `5025`, stores runtime data under `/data`, and
-publishes a health check at `/healthz`. See [DEPLOY.md](DEPLOY.md) for the
+publishes a database-aware health check at `/healthz` plus low-cardinality
+Prometheus counters at `/metrics`. See [DEPLOY.md](DEPLOY.md) for the
 Coolify variables and DNS/TLS checklist.
 
 ## Product walkthrough

@@ -98,15 +98,23 @@ class ContractService:
             where.append("c.status=?")
             params.append(status)
         if q.strip():
-            where.append("(lower(c.title) LIKE ? OR lower(c.reference) LIKE ? OR lower(COALESCE(p.name,'')) LIKE ?)")
-            needle = f"%{q.strip().lower()}%"
-            params.extend([needle, needle, needle])
-        return get_database().rows(
+            from fastclm.services.search import SearchService
+
+            ranked_ids = SearchService().search(actor, q)
+            if not ranked_ids:
+                return []
+            where.append(f"c.id IN ({','.join('?' for _ in ranked_ids)})")
+            params.extend(ranked_ids)
+        rows = get_database().rows(
             "SELECT c.*,p.name counterparty_name,u.name owner_name FROM contracts c "
             "LEFT JOIN counterparties p ON p.id=c.counterparty_id LEFT JOIN users u ON u.id=c.owner_user_id "
             f"WHERE {' AND '.join(where)} ORDER BY c.updated_at DESC",
             params,
         )
+        if q.strip():
+            rank = {contract_id: index for index, contract_id in enumerate(ranked_ids)}
+            rows.sort(key=lambda row: rank[row["id"]])
+        return rows
 
     def dashboard(self, actor: Actor) -> dict:
         actor.require("contracts.view")

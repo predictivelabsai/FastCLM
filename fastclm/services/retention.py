@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 
 from fastclm.config import settings
 from fastclm.database import get_database
@@ -41,8 +42,8 @@ class RetentionService:
         return get_database().rows(
             "SELECT v.* FROM contract_versions v JOIN contracts c ON c.id=v.contract_id AND c.organisation_id=v.organisation_id "
             "WHERE v.organisation_id=? AND v.storage_path<>'' AND v.attachment_purged_at='' "
-            "AND c.status IN ('expired','terminated') AND datetime(v.created_at) <= datetime('now', ?) ORDER BY v.created_at",
-            (organisation_id, f"-{int(policy['retention_days'])} days"),
+            "AND c.status IN ('expired','terminated') AND v.created_at<=? ORDER BY v.created_at",
+            (organisation_id, (datetime.now(timezone.utc) - timedelta(days=int(policy["retention_days"]))).replace(microsecond=0).isoformat()),
         )
 
     def run(self, organisation_id: str, actor: Actor | None = None) -> dict:
