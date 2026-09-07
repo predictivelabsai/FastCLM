@@ -33,6 +33,7 @@ from fastclm.services.credentials import clear_xai_key, key_status, store_xai_ke
 from fastclm.services.documents import DocumentService
 from fastclm.services.drafting import DraftingService
 from fastclm.services.identity import IdentityService
+from fastclm.services.notifications import NotificationService
 from fastclm.services.review import ReviewService
 from fastclm.services.retention import RetentionService
 from fastclm.services.scim import ERROR_SCHEMA, SCIMError, SCIMService, USER_SCHEMA
@@ -51,6 +52,7 @@ from fastclm.web.ui import (
     counterparties_page,
     dashboard_page,
     obligations_page,
+    notifications_page,
     settings_page,
     skill_detail_page,
     skills_page,
@@ -901,6 +903,66 @@ async def obligation_complete(request, obligation_id: str):
     except (LookupError, PermissionError) as exc:
         return PlainTextResponse(str(exc), status_code=404)
     return RedirectResponse("/obligations", status_code=303)
+
+
+@rt("/notifications")
+def notifications(request, notice: str = ""):
+    actor = _required(request, "contracts.view")
+    if isinstance(actor, Response):
+        return actor
+    return notifications_page(actor, NotificationService().overview(actor), request.session["csrf_token"], notice)
+
+
+@rt("/notifications/preferences", methods=["POST"])
+async def notification_preferences(request):
+    actor, data = await _form(request, "contracts.view")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        NotificationService().save_preferences(actor, bool(data.get("enabled")), int(data.get("due_soon_days", 14)), int(data.get("overdue_repeat_days", 1)))
+        message = "Reminder preferences updated"
+    except Exception as exc:
+        message = str(exc)
+    return RedirectResponse(f"/notifications?notice={quote(message)}", status_code=303)
+
+
+@rt("/notifications/templates", methods=["POST"])
+async def notification_template_update(request):
+    actor, data = await _form(request, "team.manage")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        NotificationService().update_template(actor, str(data.get("template_key", "")), str(data.get("subject", "")), str(data.get("body", "")), str(data.get("postmark_alias", "")))
+        message = "Notification template updated"
+    except Exception as exc:
+        message = str(exc)
+    return RedirectResponse(f"/notifications?notice={quote(message)}", status_code=303)
+
+
+@rt("/notification-escalations", methods=["POST"])
+async def notification_escalation_create(request):
+    actor, data = await _form(request, "team.manage")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        NotificationService().create_escalation(actor, str(data.get("name", "")), int(data.get("overdue_days", 0)), str(data.get("recipient_role", "")), str(data.get("recipient_user_id", "")))
+        message = "Escalation path created"
+    except Exception as exc:
+        message = str(exc)
+    return RedirectResponse(f"/notifications?notice={quote(message)}", status_code=303)
+
+
+@rt("/notification-escalations/{rule_id}/status", methods=["POST"])
+async def notification_escalation_status(request, rule_id: str):
+    actor, data = await _form(request, "team.manage")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        NotificationService().set_escalation_active(actor, rule_id, str(data.get("active", "false")).lower() == "true")
+        message = "Escalation status updated"
+    except Exception as exc:
+        message = str(exc)
+    return RedirectResponse(f"/notifications?notice={quote(message)}", status_code=303)
 
 
 @rt("/counterparties", methods=["GET"])

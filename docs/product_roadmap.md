@@ -47,10 +47,12 @@ Updated: 2026-09-08
 - Human-confirmed SignWell and DocuSign dispatch against a frozen version,
   authenticated provider/webhook verification, signer status, idempotent event
   evidence, and scanned/checksummed completed-PDF retrieval.
+- Per-user reminder opt-out, due-soon windows and overdue cadence; tenant-owned
+  local/Postmark-alias templates; and auditable role/person escalation paths
+  with retry-safe, one-time threshold delivery.
 
 ## Next production increments
 
-- Reminder preferences, escalation paths, and Postmark templates.
 - PostgreSQL repository parity, full-text search, and observability.
 - Jurisdiction-specific legal content reviewed by qualified counsel. Current
   UK/EU material is generic product scaffolding and not legal advice.

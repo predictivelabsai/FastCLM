@@ -15,7 +15,8 @@ append-only audit trail in one focused system.
 [skill editor](screenshots/05-skill-editor.png) ·
 [contract record](screenshots/08-contract-record.png) ·
 [retention and backups](screenshots/14-settings-security.png) ·
-[signature execution](screenshots/16-signature-execution.png)
+[signature execution](screenshots/16-signature-execution.png) ·
+[notification governance](screenshots/17-notification-governance.png)
 
 The default installation needs no external services. It runs on FastHTML with
 SQLite, local authentication, deterministic synthetic demonstration data, and
@@ -62,6 +63,8 @@ Connect and a token-gated integration API are optional.
   notice-window tracking, and append-only activity history.
 - Human-confirmed SignWell/DocuSign dispatch, authenticated webhook processing,
   signer status, idempotent event evidence, and verified completed PDFs.
+- Personal reminder windows/cadence, editable tenant message templates,
+  Postmark template aliases, and role- or person-based escalation paths.
 - Deterministic risk review that surfaces common commercial terms without
   making legal decisions or changing contract state.
 - Google OIDC with state validation and verified-email allowlists.

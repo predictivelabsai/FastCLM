@@ -114,6 +114,7 @@ NAV = (
     ("Contracts", "/contracts", "contracts", "contracts.view"),
     ("Approvals", "/approval-policies", "approvals", "contracts.view"),
     ("Obligations", "/obligations", "obligations", "contracts.view"),
+    ("Notifications", "/notifications", "notifications", "contracts.view"),
     ("Counterparties", "/counterparties", "counterparties", "contracts.view"),
     ("Clause library", "/clauses", "clauses", "contracts.view"),
     ("Skills library", "/skills", "skills", "assistant.use"),
@@ -713,6 +714,52 @@ def invitation_page(invitation: dict | None, token_value: str, csrf: str, signed
             cls="auth-card",
         )
     return Html(head("Workspace invitation"), Body(Main(Div(A("← FastCLM", href="/", cls="back-link"), body, cls="auth-wrap"), cls="auth-page")))
+
+
+def notifications_page(actor: Actor, data: dict, csrf: str, notice: str = "") -> Html:
+    preference = data["preferences"]
+    preferences_form = Section(
+        H3("Your reminder preferences"),
+        P("These settings apply to obligations you own in this workspace. Governance escalations remain independent.", cls="muted"),
+        Form(
+            Input(type="hidden", name="csrf", value=csrf),
+            Label(Input(type="checkbox", name="enabled", value="true", checked=bool(preference["enabled"])), "Email me about owned obligations", cls="checkbox-label"),
+            Div(Label("Due-soon window (days)", Input(type="number", min="0", max="90", name="due_soon_days", value=preference["due_soon_days"], required=True)), Label("Repeat overdue every (days)", Input(type="number", min="1", max="30", name="overdue_repeat_days", value=preference["overdue_repeat_days"], required=True)), cls="form-row"),
+            Button("Save preferences", cls="button"), action="/notifications/preferences", method="post", cls="form-stack",
+        ), cls="panel",
+    )
+    template_cards = [Section(
+        Div(Div(H3(item["name"]), P(item["template_key"].replace("_", " ").title(), cls="muted")), status_badge("active" if item["active"] else "inactive"), cls="subhead"),
+        Form(
+            Input(type="hidden", name="csrf", value=csrf), Input(type="hidden", name="template_key", value=item["template_key"]),
+            Label("Subject", Input(name="subject", value=item["subject_template"], required=True)),
+            Label("Plain-text body", Textarea(item["body_template"], name="body", rows="5", required=True)),
+            Label("Postmark template alias (optional)", Input(name="postmark_alias", value=item["postmark_alias"], placeholder="Uses TemplateModel when set")),
+            Button("Save template", cls="button secondary small"), action="/notifications/templates", method="post", cls="form-stack",
+        ) if actor.can("team.manage") else Pre(item["body_template"], cls="proposal-draft"), cls="panel",
+    ) for item in data["templates"]]
+    escalation_rows = [Div(
+        Div(Strong(item["name"]), Small(f"After {item['overdue_days']} overdue days · {item['recipient_name'] or item['recipient_role'].title()}")),
+        Div(status_badge("active" if item["active"] else "inactive"), Form(Input(type="hidden", name="csrf", value=csrf), Input(type="hidden", name="active", value="false" if item["active"] else "true"), Button("Disable" if item["active"] else "Enable", cls="button secondary small"), action=f"/notification-escalations/{item['id']}/status", method="post") if actor.can("team.manage") else None, cls="inline-actions"),
+        cls="table-row",
+    ) for item in data["escalations"]]
+    escalation_form = Form(
+        Input(type="hidden", name="csrf", value=csrf),
+        Label("Path name", Input(name="name", placeholder="Escalate to administrators", required=True)),
+        Label("Days overdue", Input(type="number", min="0", max="365", name="overdue_days", value="7", required=True)),
+        Label("Recipient role", Select(Option("Choose a role", value=""), *[Option(role.title(), value=role) for role in ("owner", "admin", "legal", "approver", "member")], name="recipient_role")),
+        Label("Or one person", Select(Option("Choose one person", value=""), *[Option(f"{item['name']} · {item['role']}", value=item["user_id"]) for item in data["members"]], name="recipient_user_id")),
+        Button("Create escalation", cls="button"), action="/notification-escalations", method="post", cls="form-stack",
+    ) if actor.can("team.manage") else None
+    content = Div(
+        page_intro("NOTIFICATIONS", "Useful reminders, deliberate escalation", "Control personal cadence, tenant wording, and who is notified when an obligation remains overdue."),
+        Div(notice, cls="alert success") if notice else None,
+        preferences_form,
+        Section(H3("Message templates"), P("Use the documented {{token}} placeholders below, or set a Postmark alias to render the same model in Postmark.", cls="muted"), Div(*template_cards, cls="three-column"), cls="section-stack"),
+        Div(Section(H3("Escalation paths"), Div(*escalation_rows, cls="table-card") if escalation_rows else empty_state("No escalation paths", "Create a role-based or person-specific path."), cls="panel"), Section(H3("Add escalation"), escalation_form, cls="panel") if escalation_form else None, cls="two-column"),
+        cls="page-scroll",
+    )
+    return shell(actor, "notifications", "Notifications", content)
 
 
 def settings_page(actor: Actor, key: dict, usage: dict, memberships: list[dict], retention: dict, backups: list[dict], csrf: str, notice: str = "") -> Html:

@@ -52,6 +52,8 @@ class IdentityService:
         self.seed_clauses(organisation_id)
         from fastclm.services.skills import SkillService
         SkillService().seed(organisation_id, user_id)
+        from fastclm.services.notifications import NotificationService
+        NotificationService().seed(organisation_id, user_id)
         return self.user(user_id), self.organisation(organisation_id)
 
     def authenticate(self, email: str, password: str) -> dict | None:
@@ -83,6 +85,8 @@ class IdentityService:
         self.seed_clauses(organisation_id)
         from fastclm.services.skills import SkillService
         SkillService().seed(organisation_id, user_id)
+        from fastclm.services.notifications import NotificationService
+        NotificationService().seed(organisation_id, user_id)
         return self.user(user_id), self.organisation(organisation_id)
 
     def ensure_oauth_user(self, email: str, name: str) -> dict:

@@ -20,7 +20,7 @@ Word / PDF ─ extraction ──────┼─ immutable contract versions
                               ├─ staged approval runs + delegation evidence
                               ├─ templates + fallback playbooks
                               ├─ deterministic / xAI review
-                              ├─ Postmark reminder runner
+                              ├─ Postmark templates + escalation runner
                               └─ DocuSign / SignWell execution + evidence
 
 SCIM /scim/v2 ─ bearer + organisation ─ memberships + audit
@@ -134,7 +134,9 @@ SignWell webhook claims are checked against its authenticated document API;
 DocuSign Connect messages require an HMAC over the exact body. Verified events
 and recipient states are tenant-scoped and idempotent. Completion retrieves the
 provider PDF with its audit page, scans and checksums it, and stores it beside
-the evidence trail. The reminder runner is idempotent per obligation,
-recipient, kind, and day. Production runs it in-process on a configurable
-interval; failed deliveries remain retryable while successful deliveries are
-suppressed for the rest of the day.
+the evidence trail. Reminder candidates respect each owner's opt-out,
+due-soon window, and overdue cadence. Tenant templates render locally or by
+Postmark alias. Escalation rules target a person or every member of a role and
+use a fixed threshold date, so a successful escalation is sent only once while
+failures remain retryable. Production runs the worker in-process on a
+configurable interval.

@@ -133,6 +133,7 @@ textarea { resize: vertical; line-height: 1.55; }
 .panel { padding: 20px; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; }
 .panel h3 { margin: 0 0 14px; font-size: 17px; }
 .two-column { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(280px, .55fr); gap: 18px; align-items: start; }
+.three-column { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; align-items: start; }
 .form-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
 .filters { margin-bottom: 16px; display: grid; grid-template-columns: 1fr 190px auto; gap: 10px; }
 .record-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
@@ -293,6 +294,7 @@ textarea { resize: vertical; line-height: 1.55; }
   .stats-grid { grid-template-columns: repeat(3, 1fr); }
   .record-grid { grid-template-columns: repeat(2, 1fr); }
   .detail-grid { grid-template-columns: repeat(2, 1fr); }
+  .three-column { grid-template-columns: 1fr; }
   .assistant-cockpit { grid-template-columns: minmax(0, 1fr) 280px; }
 }
 
