@@ -10,3 +10,4 @@
 13-team.png
 14-settings-security.png
 15-approval-governance.png
+16-signature-execution.png

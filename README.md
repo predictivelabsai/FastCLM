@@ -14,7 +14,8 @@ append-only audit trail in one focused system.
 [skills library](screenshots/04-skills-library.png) ·
 [skill editor](screenshots/05-skill-editor.png) ·
 [contract record](screenshots/08-contract-record.png) ·
-[retention and backups](screenshots/14-settings-security.png)
+[retention and backups](screenshots/14-settings-security.png) ·
+[signature execution](screenshots/16-signature-execution.png)
 
 The default installation needs no external services. It runs on FastHTML with
 SQLite, local authentication, deterministic synthetic demonstration data, and
@@ -59,6 +60,8 @@ Connect and a token-gated integration API are optional.
   application-encrypted, tenant-scoped backups containing verified sources.
 - Approval decisions, due and overdue obligations, clause library, renewal and
   notice-window tracking, and append-only activity history.
+- Human-confirmed SignWell/DocuSign dispatch, authenticated webhook processing,
+  signer status, idempotent event evidence, and verified completed PDFs.
 - Deterministic risk review that surfaces common commercial terms without
   making legal decisions or changing contract state.
 - Google OIDC with state validation and verified-email allowlists.

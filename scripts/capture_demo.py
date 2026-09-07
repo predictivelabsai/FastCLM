@@ -34,8 +34,9 @@ CAPTURES = (
     "13-team.png",
     "14-settings-security.png",
     "15-approval-governance.png",
+    "16-signature-execution.png",
 )
-FRAMES = CAPTURES[1:10] + ("13-team.png", "14-settings-security.png", "15-approval-governance.png")
+FRAMES = CAPTURES[1:10] + ("13-team.png", "14-settings-security.png", "15-approval-governance.png", "16-signature-execution.png")
 
 
 def wait_for_server(process: subprocess.Popen) -> None:
@@ -69,6 +70,8 @@ def main() -> None:
         "FASTCLM_DB": str(data_dir / "fastclm.sqlite"),
         "FASTCLM_UPLOAD_DIR": str(data_dir / "uploads"),
         "FASTCLM_REMINDER_SCHEDULER_ENABLED": "false",
+        "SIGNWELL_API_KEY": "synthetic-demo-key-not-used",
+        "SIGNWELL_WEBHOOK_TOKEN": "synthetic-demo-webhook-token",
     })
     process = subprocess.Popen(
         [sys.executable, "web_app.py"], cwd=ROOT, env=env,
@@ -121,6 +124,12 @@ def main() -> None:
             shot(page, "14-settings-security.png")
             page.goto(f"{BASE}/approval-policies", wait_until="networkidle")
             shot(page, "15-approval-governance.png")
+            page.goto(f"{BASE}/contracts", wait_until="networkidle")
+            page.get_by_role("link", name="EU data processing agreement", exact=False).click()
+            page.get_by_text("Electronic signature", exact=True).scroll_into_view_if_needed()
+            page.mouse.wheel(0, 900)
+            page.wait_for_timeout(200)
+            shot(page, "16-signature-execution.png")
 
             mobile_public = browser.new_context(viewport={"width": 390, "height": 844}, device_scale_factor=1)
             mobile_page = mobile_public.new_page()

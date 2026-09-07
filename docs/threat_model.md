@@ -44,12 +44,15 @@ tokens, invitation links, SCIM identity mappings, and audit history.
 - **Secret exposure:** environment-only fleet secrets and encrypted per-user
   BYOK values that are never returned to the browser.
 - **Abusive model spend:** atomic five-query allowance and BYOK preference.
-- **External side effects:** signature requests are local drafts; reminders are
-  idempotent and require a configured server token.
+- **External side effects:** signature requests remain local drafts until a
+  separate human-confirmed dispatch. SignWell events are verified by provider
+  lookup, DocuSign events by exact-body HMAC, duplicate events are suppressed,
+  and completed files are scanned and checksummed. Reminders are idempotent and
+  require a configured server token.
 
 ## Production work still required
 
 Add OCR process isolation, automated backup restore exercises, ClamAV signature
 operations, CSP/security headers at the proxy, rate limiting, configurable RBAC,
-webhook verification, secret rotation procedures, and an external penetration
+secret rotation procedures, and an external penetration
 test before handling sensitive production agreements.

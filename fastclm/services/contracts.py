@@ -77,6 +77,15 @@ class ContractService:
         item["obligations"] = get_database().rows("SELECT * FROM obligations WHERE contract_id=? AND organisation_id=? ORDER BY status,due_date", (contract_id, actor.organisation_id))
         item["approvals"] = get_database().rows("SELECT a.*,u.name approver_name FROM approvals a JOIN users u ON u.id=a.approver_user_id WHERE a.contract_id=? AND a.organisation_id=? ORDER BY decided_at DESC", (contract_id, actor.organisation_id))
         item["signatures"] = get_database().rows("SELECT * FROM signature_requests WHERE contract_id=? AND organisation_id=? ORDER BY created_at DESC", (contract_id, actor.organisation_id))
+        for signature in item["signatures"]:
+            signature["recipients"] = get_database().rows(
+                "SELECT * FROM signature_recipients WHERE signature_request_id=? AND organisation_id=? ORDER BY updated_at",
+                (signature["id"], actor.organisation_id),
+            )
+            signature["events"] = get_database().rows(
+                "SELECT * FROM signature_events WHERE signature_request_id=? AND organisation_id=? ORDER BY received_at DESC",
+                (signature["id"], actor.organisation_id),
+            )
         item["findings"] = get_database().rows("SELECT * FROM review_findings WHERE contract_id=? AND organisation_id=? ORDER BY created_at DESC LIMIT 5", (contract_id, actor.organisation_id))
         item["next_statuses"] = next_statuses(item["status"])
         return item

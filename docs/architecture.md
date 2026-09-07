@@ -21,7 +21,7 @@ Word / PDF ─ extraction ──────┼─ immutable contract versions
                               ├─ templates + fallback playbooks
                               ├─ deterministic / xAI review
                               ├─ Postmark reminder runner
-                              └─ DocuSign / SignWell adapter drafts
+                              └─ DocuSign / SignWell execution + evidence
 
 SCIM /scim/v2 ─ bearer + organisation ─ memberships + audit
 ```
@@ -128,8 +128,13 @@ playbooks group preferred clauses and their explicit fallbacks.
 
 ## External actions
 
-The signature adapters create local, reviewable provider payloads. They do not
-send envelopes automatically. The reminder runner is idempotent per obligation,
+The signature adapters create local drafts frozen to an immutable contract
+version. A signed-in lifecycle manager must separately confirm dispatch.
+SignWell webhook claims are checked against its authenticated document API;
+DocuSign Connect messages require an HMAC over the exact body. Verified events
+and recipient states are tenant-scoped and idempotent. Completion retrieves the
+provider PDF with its audit page, scans and checksums it, and stores it beside
+the evidence trail. The reminder runner is idempotent per obligation,
 recipient, kind, and day. Production runs it in-process on a configurable
 interval; failed deliveries remain retryable while successful deliveries are
 suppressed for the rest of the day.

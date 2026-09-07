@@ -40,6 +40,17 @@ The default hourly cycle is retry-safe and records successful or failed
 Postmark delivery attempts without sending a duplicate successful reminder on
 the same day.
 
+SignWell dispatch requires `SIGNWELL_API_KEY`; incoming events are verified by
+reading the claimed document through the authenticated provider API. DocuSign
+supports a short-lived `DOCUSIGN_ACCESS_TOKEN` or JWT grant credentials via
+`DOCUSIGN_INTEGRATION_KEY`, `DOCUSIGN_USER_ID`, and `DOCUSIGN_PRIVATE_KEY`, plus
+`DOCUSIGN_ACCOUNT_ID`. Configure Connect to send JSON to
+`https://clm.fastsme.com/webhooks/docusign` with HMAC enabled, and store the
+matching value in `DOCUSIGN_WEBHOOK_SECRET`. Register SignWell's callback as
+`https://clm.fastsme.com/webhooks/signwell?token=<SIGNWELL_WEBHOOK_TOKEN>`; the
+unguessable token and authenticated provider lookup are both required. Keep both providers in their test
+environments until end-to-end evidence retrieval has been reviewed.
+
 Google Auth Platform must have this exact authorised redirect URI:
 
 ```text

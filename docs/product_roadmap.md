@@ -1,6 +1,6 @@
 # FastCLM product roadmap
 
-Updated: 2026-09-07
+Updated: 2026-09-08
 
 ## Delivered foundation
 
@@ -44,11 +44,12 @@ Updated: 2026-09-07
 - Configurable ordered approval policies with stage quorums, role and named
   assignee eligibility, requester exclusion, separation of duties, bounded
   delegation, and attributable direct/delegated decision evidence.
+- Human-confirmed SignWell and DocuSign dispatch against a frozen version,
+  authenticated provider/webhook verification, signer status, idempotent event
+  evidence, and scanned/checksummed completed-PDF retrieval.
 
 ## Next production increments
 
-- Explicitly confirmed SignWell/DocuSign dispatch, webhook signature
-  verification, signer status, completed-PDF retrieval, and evidence trails.
 - Reminder preferences, escalation paths, and Postmark templates.
 - PostgreSQL repository parity, full-text search, and observability.
 - Jurisdiction-specific legal content reviewed by qualified counsel. Current

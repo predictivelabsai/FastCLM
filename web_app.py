@@ -834,6 +834,55 @@ async def signature_prepare(request, contract_id: str):
     return RedirectResponse(f"/contracts/{contract_id}?notice={quote(message)}", status_code=303)
 
 
+@rt("/signatures/{request_id}/dispatch", methods=["POST"])
+async def signature_dispatch(request, request_id: str):
+    actor, _ = await _form(request, "contracts.transition")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        item = SignatureService().dispatch(actor, request_id)
+        message = "Signature request dispatched"
+    except Exception as exc:
+        item = get_database().one("SELECT contract_id FROM signature_requests WHERE id=? AND organisation_id=?", (request_id, actor.organisation_id))
+        message = str(exc)
+    if not item:
+        return PlainTextResponse("Signature request not found", status_code=404)
+    return RedirectResponse(f"/contracts/{item['contract_id']}?notice={quote(message)}", status_code=303)
+
+
+@rt("/signatures/{request_id}/completed")
+def signature_completed(request, request_id: str):
+    actor = _required(request, "contracts.view")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        item, content = SignatureService().completed_content(actor, request_id)
+    except LookupError:
+        return PlainTextResponse("Completed document not found", status_code=404)
+    except ValueError as exc:
+        return PlainTextResponse(str(exc), status_code=409)
+    return Response(content, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{item["reference"]}-signed.pdf"'})
+
+
+@rt("/webhooks/{provider}", methods=["POST"])
+async def signature_webhook(request, provider: str, token: str = ""):
+    try:
+        content = await request.body()
+        headers = dict(request.headers)
+        if provider == "signwell":
+            headers["x-fastclm-signwell-token"] = token
+        event = SignatureService().handle_webhook(provider, content, headers)
+        return JSONResponse({"received": True, "event_id": event["id"]})
+    except PermissionError:
+        return JSONResponse({"received": False, "error": "verification_failed"}, status_code=401)
+    except LookupError:
+        return JSONResponse({"received": False, "error": "not_found"}, status_code=404)
+    except ValueError:
+        return JSONResponse({"received": False, "error": "invalid_payload"}, status_code=400)
+    except Exception:
+        return JSONResponse({"received": False, "error": "temporary_failure"}, status_code=503)
+
+
 @rt("/obligations")
 def obligations(request, status: str = "open"):
     actor = _required(request, "contracts.view")
@@ -1298,6 +1347,10 @@ def healthz():
             "backup_key": "configured" if settings.backup_key else "derived",
         },
         "reminders": {"scheduler": "enabled" if settings.reminder_scheduler_enabled else "disabled"},
+        "signatures": {
+            "signwell": "configured" if SignatureService().configured("signwell") else "disabled",
+            "docusign": "configured" if SignatureService().configured("docusign") else "disabled",
+        },
     }, status_code=200 if database_status == "ok" else 503)
 
 

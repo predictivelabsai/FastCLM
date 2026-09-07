@@ -418,7 +418,21 @@ def contract_detail_page(actor: Actor, contract: dict, counterparties: list[dict
             ) if actor.can("team.manage") and approval_run and approval_run["status"] == "active" else None,
             cls="finding",
         ))
-    signatures = [Div(Div(H3(f"{item['provider'].title()} · {item['recipient_name']}"), P(item["recipient_email"], cls="muted")), status_badge(item["status"]), cls="table-row") for item in contract["signatures"]]
+    signatures = [Div(
+        Div(
+            Div(Div(H3(f"{item['provider'].title()} · {item['recipient_name']}"), P(item["recipient_email"], cls="muted")), status_badge(item["status"]), cls="subhead"),
+            P(f"Frozen version {item['source_version_id'][:8] if item.get('source_version_id') else 'legacy'} · {len(item['events'])} verified events", cls="muted"),
+            Div(*[Span(f"{recipient['name'] or recipient['email']}: {recipient['status'].replace('_', ' ')}", cls="callout") for recipient in item["recipients"]], cls="inline-actions") if item["recipients"] else None,
+            Div(*[Small(f"{event['event_type'].replace('_', ' ')} · {event['received_at']} · verified") for event in item["events"][:3]], cls="form-stack") if item["events"] else None,
+        ),
+        Div(
+            Form(Input(type="hidden", name="csrf", value=csrf), Button("Confirm and dispatch", cls="button small"), action=f"/signatures/{item['id']}/dispatch", method="post") if actor.can("contracts.transition") and item["status"] == "draft_ready" else None,
+            Span("Provider setup required", cls="callout") if item["status"] == "configuration_required" else None,
+            Span("Reconcile with provider before retry", cls="callout") if item["status"] == "dispatch_unknown" else None,
+            A("Completed PDF", href=f"/signatures/{item['id']}/completed", cls="button secondary small") if item.get("completed_storage_path") else None,
+            cls="inline-actions",
+        ), cls="signature-card panel",
+    ) for item in contract["signatures"]]
     findings = []
     for review in contract["findings"]:
         for item in json.loads(review["findings_json"]):
@@ -524,7 +538,7 @@ def contract_detail_page(actor: Actor, contract: dict, counterparties: list[dict
             Div(
                 Section(H3("Contract review"), P("Rule-based review is always available. xAI provides a deeper assistive review and never changes approval or lifecycle state.", cls="muted"), Div(Span(f"{usage['remaining']} of {usage['limit']} shared AI queries remain" if not usage["has_byok"] else "Using your encrypted xAI key", cls="callout")), Form(Input(type="hidden", name="csrf", value=csrf), Input(type="hidden", name="use_ai", value="false"), Button("Run local review", cls="button secondary full"), action=f"/contracts/{contract['id']}/review", method="post"), Form(Input(type="hidden", name="csrf", value=csrf), Input(type="hidden", name="use_ai", value="true"), Button("Review with xAI", cls="button full"), action=f"/contracts/{contract['id']}/review", method="post"), *findings, cls="panel form-stack"),
                 Section(H3("Approval workflow"), P(f"{approval_run['policy_name']} · {approval_run['status'].replace('_', ' ').title()}" if approval_run else "A policy is selected when the contract enters approval.", cls="muted"), *approval_stages, Div(*approvals, cls="table-card") if approvals else None, Form(Input(type="hidden", name="csrf", value=csrf), Select(Option("Approve current stage", value="approved"), Option("Request changes", value="changes_requested"), name="decision"), Textarea(name="comment", rows="2", placeholder="Decision rationale"), Button("Record human decision", cls="button"), action=f"/contracts/{contract['id']}/approval", method="post", cls="form-stack") if actor.can("contracts.approve") and contract["status"] == "approval" else None, cls="panel"),
-                Section(H3("Electronic signature"), P("Prepare a provider payload for review. No envelope or document is sent automatically.", cls="muted"), Div(*signatures, cls="table-card") if signatures else None, Form(Input(type="hidden", name="csrf", value=csrf), Select(Option("SignWell", value="signwell"), Option("DocuSign", value="docusign"), name="provider"), Input(name="recipient_name", placeholder="Signer name", required=True), Input(type="email", name="recipient_email", placeholder="signer@example.com", required=True), Button("Prepare signature request", cls="button"), action=f"/contracts/{contract['id']}/signatures", method="post", cls="form-stack") if actor.can("contracts.transition") and contract["status"] == "signature" else None, cls="panel"),
+                Section(H3("Electronic signature"), P("Prepare a frozen provider draft, inspect it, then explicitly confirm dispatch. Verified webhook events and completed PDFs remain evidence records.", cls="muted"), Div(*signatures, cls="section-stack") if signatures else None, Form(Input(type="hidden", name="csrf", value=csrf), Select(Option("SignWell", value="signwell"), Option("DocuSign", value="docusign"), name="provider"), Input(name="recipient_name", placeholder="Signer name", required=True), Input(type="email", name="recipient_email", placeholder="signer@example.com", required=True), Button("Prepare signature request", cls="button"), action=f"/contracts/{contract['id']}/signatures", method="post", cls="form-stack") if actor.can("contracts.transition") and contract["status"] == "signature" else None, cls="panel"),
                 cls="section-stack",
             ),
             cls="two-column",

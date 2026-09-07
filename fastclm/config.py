@@ -53,7 +53,17 @@ class Settings:
     reminder_scheduler_enabled: bool
     reminder_interval_seconds: int
     signwell_api_key: str
+    signwell_api_base_url: str
     signwell_test_mode: bool
+    signwell_webhook_token: str
+    docusign_access_token: str
+    docusign_integration_key: str
+    docusign_user_id: str
+    docusign_account_id: str
+    docusign_private_key: str
+    docusign_api_base_url: str
+    docusign_oauth_base_url: str
+    docusign_webhook_secret: str
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -101,7 +111,17 @@ class Settings:
             reminder_scheduler_enabled=os.getenv("FASTCLM_REMINDER_SCHEDULER_ENABLED", "false").lower() == "true",
             reminder_interval_seconds=max(300, int(os.getenv("FASTCLM_REMINDER_INTERVAL_SECONDS", "3600"))),
             signwell_api_key=os.getenv("SIGNWELL_API_KEY", "").strip(),
+            signwell_api_base_url=os.getenv("SIGNWELL_API_BASE_URL", "https://www.signwell.com/api/v1").rstrip("/"),
             signwell_test_mode=os.getenv("SIGNWELL_TEST_MODE", "true").lower() == "true",
+            signwell_webhook_token=os.getenv("SIGNWELL_WEBHOOK_TOKEN", "").strip(),
+            docusign_access_token=os.getenv("DOCUSIGN_ACCESS_TOKEN", "").strip(),
+            docusign_integration_key=os.getenv("DOCUSIGN_INTEGRATION_KEY", "").strip(),
+            docusign_user_id=os.getenv("DOCUSIGN_USER_ID", "").strip(),
+            docusign_account_id=os.getenv("DOCUSIGN_ACCOUNT_ID", "").strip(),
+            docusign_private_key=os.getenv("DOCUSIGN_PRIVATE_KEY", "").strip(),
+            docusign_api_base_url=os.getenv("DOCUSIGN_API_BASE_URL", "https://demo.docusign.net/restapi").rstrip("/"),
+            docusign_oauth_base_url=os.getenv("DOCUSIGN_OAUTH_BASE_URL", "https://account-d.docusign.com").rstrip("/"),
+            docusign_webhook_secret=os.getenv("DOCUSIGN_WEBHOOK_SECRET", "").strip(),
         )
 
 

@@ -10,6 +10,7 @@ from fastclm.services.documents import DocumentService
 from fastclm.services.drafting import DraftingService
 from fastclm.services.identity import IdentityService
 from fastclm.services.assistant import AssistantService
+from fastclm.services.signatures import SignatureService
 
 
 DEMO_EMAIL = "owner@fastclm.example"
@@ -103,6 +104,9 @@ def ensure_demo() -> tuple[dict, dict]:
     service.add_block(actor, dpa["id"], "clause", "The agreement is governed by German law and may be terminated if the main services agreement ends.")
     service.snapshot(actor, dpa["id"], "Internal review draft")
     service.transition(actor, dpa["id"], "review")
+    service.transition(actor, dpa["id"], "approval")
+    service.approve(actor, dpa["id"], "approved", "Data protection approval complete.")
+    SignatureService().prepare(actor, dpa["id"], "signwell", "Robin Fischer", "robin@atelier.example")
     starter_clauses = service.clauses(actor)[:3]
     drafting.create_template(actor, {
         "name": "UK services starter", "contract_type": "Master services agreement", "jurisdiction": "England and Wales",
