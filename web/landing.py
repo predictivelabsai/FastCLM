@@ -1,7 +1,7 @@
 """FastCLM public product landing page."""
 from fasthtml.common import *
 
-from fastclm.web.ui import logo, product_mock
+from fastclm.web.ui import logo
 
 from .seo import DESCRIPTION, seo_meta
 
@@ -18,15 +18,15 @@ def _head() -> Head:
         Link(rel="preconnect", href="https://fonts.googleapis.com"),
         Link(rel="preconnect", href="https://fonts.gstatic.com", crossorigin=""),
         Link(rel="stylesheet", href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Newsreader:opsz,wght@6..72,600&display=swap"),
-        Link(rel="stylesheet", href="/static/app.css?v=2"),
+        Link(rel="stylesheet", href="/static/app.css?v=3"),
     )
 
 
 def landing_page() -> Html:
     features = (
-        ("One contract record", "Keep Word and PDF originals, editable blocks, counterparties, commercial facts, and immutable versions together."),
-        ("Governed lifecycle", "Move from draft to review, approval, signature, and active management through explicit, audited gates."),
-        ("Dates that do work", "Track obligations, notice windows, renewals, expiry, and accountable owners before deadlines become surprises."),
+        ("Ask the workspace", "Question one agreement or search the whole portfolio. Answers stay grounded in visible, organisation-scoped sources."),
+        ("Skills you can inspect", "Read and edit the Markdown capabilities that guide review, Q&A, snapshots, and obligation extraction. Every save keeps a version."),
+        ("Human-controlled action", "Let the assistant prepare lifecycle work while approvals, signatures, activation, termination, and access remain explicit human decisions."),
     )
     return Html(
         _head(),
@@ -45,12 +45,12 @@ def landing_page() -> Html:
                 Section(
                     Div(
                         P("OPEN CONTRACT LIFECYCLE MANAGEMENT", cls="eyebrow"),
-                        H1("Know what you agreed—and what happens next."),
+                        H1("Ask your contracts what happens next."),
                         P(DESCRIPTION, cls="hero-copy"),
                         Div(A("Create your workspace", href="/signup", cls="button"), A("Explore the API", href="/developers", cls="button secondary"), cls="hero-actions"),
                         P("MIT licensed · SQLite included · Your documents stay private", cls="proof"),
                     ),
-                    Div(product_mock(), cls="hero-product"),
+                    Div(Img(src="/static/product-demo.gif", alt="FastCLM AI assistant, source-aware PDF viewer, skills editor, and contract workspace walkthrough", cls="hero-demo"), cls="hero-product"),
                     cls="hero",
                 ),
                 Section(

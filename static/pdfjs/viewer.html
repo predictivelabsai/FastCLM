@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>PDF Viewer</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; overflow: hidden; background: #eee; font-family: sans-serif; }
+
+#toolbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 10px; background: #333; color: #fff; font-size: 13px;
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100; height: 36px;
+}
+#toolbar input[type=text] {
+  padding: 3px 8px; border: 1px solid #555; border-radius: 3px;
+  background: #444; color: #fff; font-size: 12px; width: 200px;
+}
+#toolbar button {
+  padding: 3px 10px; border: none; border-radius: 3px; cursor: pointer;
+  background: #555; color: #fff; font-size: 12px;
+}
+#toolbar button:hover { background: #777; }
+#match-info { font-size: 11px; color: #ccc; min-width: 80px; }
+
+#evidence-banner {
+  display: none; position: fixed; top: 36px; left: 0; right: 0; z-index: 90;
+  padding: 7px 10px; border-bottom: 1px solid #d6a800;
+  background: #fff8d8; color: #4a3b00; font-size: 11px; line-height: 1.35;
+  max-height: 58px; overflow: auto;
+}
+#evidence-banner.visible { display: block; }
+
+#viewer-container {
+  position: absolute; top: 36px; bottom: 0; left: 0; right: 0;
+  overflow: auto; background: #888;
+}
+body.has-evidence #viewer-container { top: 94px; }
+.page-wrapper {
+  margin: 10px auto; background: #fff; position: relative;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+.page-wrapper.placeholder {
+  width: min(900px, calc(100% - 20px)); height: 1100px;
+  display: flex; align-items: center; justify-content: center;
+  color: #777; font-size: 12px;
+}
+canvas { display: block; }
+
+.text-layer {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  overflow: hidden; opacity: 0.25; line-height: 1;
+}
+.text-layer span {
+  position: absolute; white-space: pre; color: transparent;
+  pointer-events: all;
+}
+.text-layer .highlight { background: rgba(255, 200, 0, 0.6); border-radius: 2px; }
+.text-layer .highlight.active { background: rgba(255, 120, 0, 0.8); }
+.text-layer ::selection { background: rgba(0, 100, 255, 0.3); }
+.ocr-highlight {
+  position: absolute; z-index: 8; pointer-events: none;
+  border: 3px solid #ff3d00; border-radius: 4px;
+  background: rgba(255, 110, 64, 0.28);
+  box-shadow: 0 0 0 2px rgba(255,255,255,.8), 0 2px 12px rgba(0,0,0,.28);
+}
+
+#loading-panel {
+  position: fixed; inset: 36px 0 0; z-index: 120;
+  display: flex; align-items: center; justify-content: center;
+  flex-direction: column; gap: 9px; background: rgba(238,238,238,.94);
+  color: #444; font-size: 12px;
+}
+#loading-panel.hidden { display: none; }
+#progress-track {
+  width: min(300px, 72%); height: 5px; overflow: hidden;
+  border-radius: 99px; background: #ccc;
+}
+#progress-bar {
+  width: 5%; height: 100%; border-radius: inherit;
+  background: #ff3d00; transition: width .18s ease;
+}
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <input type="text" id="search-input" placeholder="Search in PDF...">
+  <button id="btn-prev" title="Previous match">&#9650;</button>
+  <button id="btn-next" title="Next match">&#9660;</button>
+  <span id="match-info"></span>
+</div>
+<div id="evidence-banner" role="status"></div>
+<div id="viewer-container"></div>
+<div id="loading-panel" role="status" aria-live="polite">
+  <span id="loading-status">Loading PDF…</span>
+  <div id="progress-track"><div id="progress-bar"></div></div>
+</div>
+
+<script type="module">
+import * as pdfjsLib from './pdf.min.mjs?v=4';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = './pdf.worker.min.mjs?v=4';
+
+const container = document.getElementById('viewer-container');
+const searchInput = document.getElementById('search-input');
+const matchInfo = document.getElementById('match-info');
+const btnPrev = document.getElementById('btn-prev');
+const btnNext = document.getElementById('btn-next');
+const evidenceBanner = document.getElementById('evidence-banner');
+const loadingPanel = document.getElementById('loading-panel');
+const loadingStatus = document.getElementById('loading-status');
+const progressBar = document.getElementById('progress-bar');
+
+const params = new URLSearchParams(window.location.search);
+const pdfUrl = params.get('file');
+let targetPage = parseInt(params.get('page') || '0', 10);
+const hashParams = new URLSearchParams(window.location.hash.substring(1));
+const initialSearch = hashParams.get('search') || '';
+const evidenceText = hashParams.get('evidence') || initialSearch;
+targetPage = parseInt(hashParams.get('page') || String(targetPage), 10);
+
+const SCALE = 1.5;
+let pdfDocument = null;
+let pageWrappers = [];
+let pageItems = new Map();
+let pageRenderPromises = new Map();
+let highlights = [];
+let currentMatch = -1;
+let observer = null;
+
+function notify(type, detail) {
+  window.parent.postMessage(Object.assign({source: 'ai-indurent-pdf-viewer', type}, detail || {}), '*');
+}
+
+function setProgress(status, percent, visible = true) {
+  loadingStatus.textContent = status;
+  if (typeof percent === 'number') {
+    progressBar.style.width = Math.max(3, Math.min(100, percent)) + '%';
+  }
+  loadingPanel.classList.toggle('hidden', !visible);
+  notify('progress', {status, percent});
+}
+
+function hideProgress() {
+  loadingPanel.classList.add('hidden');
+}
+
+function showEvidence(message) {
+  if (!message) return;
+  evidenceBanner.textContent = message;
+  evidenceBanner.classList.add('visible');
+  document.body.classList.add('has-evidence');
+}
+
+async function locatePositionedEvidence(pageNumber, evidence, scanned) {
+  if (!pdfUrl || !evidence) return false;
+  setProgress(scanned ? 'Reading cited scanned page with OCR…' : 'Locating cited evidence…', 92);
+  try {
+    const response = await fetch('/pdf-provenance', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({source: pdfUrl, page: pageNumber, evidence}),
+    });
+    if (!response.ok) return false;
+    const result = await response.json();
+    if (!result.ok || !result.rect) return false;
+    // The locator may find the evidence on a neighbouring page when the citation
+    // was off by a page — render and jump to the page it is actually on.
+    const actualPage = result.page || pageNumber;
+    if (actualPage !== pageNumber) {
+      await renderPage(actualPage, true);
+    }
+    const wrapper = pageWrappers[actualPage - 1];
+    if (!wrapper) return false;
+    const rect = result.rect;
+    const marker = document.createElement('div');
+    marker.className = 'ocr-highlight';
+    marker.setAttribute('aria-label', 'AI evidence located by OCR');
+    marker.style.left = (rect.left * 100) + '%';
+    marker.style.top = (rect.top * 100) + '%';
+    marker.style.width = (rect.width * 100) + '%';
+    marker.style.height = (rect.height * 100) + '%';
+    wrapper.appendChild(marker);
+    const confidence = typeof result.ocr_confidence === 'number'
+      ? ' · OCR confidence ' + Math.round(result.ocr_confidence * 100) + '%'
+      : '';
+    const kind = scanned ? 'Scanned evidence' : 'Evidence';
+    const moved = result.page_adjusted
+      ? ' (cited page ' + pageNumber + ', found on ' + actualPage + ')'
+      : '';
+    showEvidence(kind + ' located by OCR on page ' + actualPage + moved + confidence + '. ' + evidence);
+    matchInfo.textContent = 'OCR evidence';
+    marker.scrollIntoView({behavior: 'auto', block: 'center'});
+    notify('provenance', {page: actualPage, requestedPage: pageNumber,
+                          pageAdjusted: !!result.page_adjusted, matchScore: result.match_score,
+                          cached: result.cached, model: result.model});
+    return true;
+  } catch (error) {
+    console.error('Scanned provenance lookup failed', error);
+    return false;
+  }
+}
+
+function createPageSlots(pageCount) {
+  const fragment = document.createDocumentFragment();
+  for (let pageNumber = 1; pageNumber <= pageCount; pageNumber++) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'page-wrapper placeholder';
+    wrapper.dataset.page = String(pageNumber);
+    wrapper.textContent = 'Page ' + pageNumber;
+    pageWrappers.push(wrapper);
+    fragment.appendChild(wrapper);
+  }
+  container.appendChild(fragment);
+}
+
+async function renderPage(pageNumber, announce = false) {
+  if (pageRenderPromises.has(pageNumber)) return pageRenderPromises.get(pageNumber);
+  const promise = (async () => {
+    if (announce) setProgress('Rendering cited page ' + pageNumber + '…', 72);
+    const page = await pdfDocument.getPage(pageNumber);
+    const viewport = page.getViewport({scale: SCALE});
+    const wrapper = pageWrappers[pageNumber - 1];
+    wrapper.replaceChildren();
+    wrapper.classList.remove('placeholder');
+    wrapper.style.width = viewport.width + 'px';
+    wrapper.style.height = viewport.height + 'px';
+
+    const canvas = document.createElement('canvas');
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    wrapper.appendChild(canvas);
+    await page.render({canvasContext: canvas.getContext('2d'), viewport}).promise;
+
+    if (announce) setProgress('Locating AI evidence on page ' + pageNumber + '…', 90);
+    const textLayer = document.createElement('div');
+    textLayer.className = 'text-layer';
+    textLayer.style.width = viewport.width + 'px';
+    textLayer.style.height = viewport.height + 'px';
+    wrapper.appendChild(textLayer);
+
+    const items = [];
+    const textContent = await page.getTextContent();
+    for (const item of textContent.items) {
+      if (!item.str) continue;
+      const tx = pdfjsLib.Util.transform(viewport.transform, item.transform);
+      const span = document.createElement('span');
+      span.textContent = item.str;
+      const fontHeight = Math.sqrt(tx[2] * tx[2] + tx[3] * tx[3]);
+      span.style.left = tx[4] + 'px';
+      span.style.top = (tx[5] - fontHeight) + 'px';
+      span.style.fontSize = fontHeight + 'px';
+      span.style.fontFamily = item.fontName || 'sans-serif';
+      textLayer.appendChild(span);
+      items.push({pageIdx: pageNumber - 1, span, text: item.str});
+    }
+    pageItems.set(pageNumber, items);
+    return items;
+  })();
+  pageRenderPromises.set(pageNumber, promise);
+  return promise;
+}
+
+function renderedItems() {
+  return Array.from(pageItems.values()).flat();
+}
+
+function clearHighlights() {
+  for (const item of highlights) item.span.classList.remove('highlight', 'active');
+  highlights = [];
+  currentMatch = -1;
+  matchInfo.textContent = '';
+}
+
+function normalize(text) {
+  return text.toLowerCase().replace(/[^\p{L}\p{N}£]+/gu, ' ').trim().replace(/\s+/g, ' ');
+}
+
+function doSearch(query, preferPage) {
+  clearHighlights();
+  if (!query) return;
+  const itemsToSearch = renderedItems();
+  const normalizedQuery = normalize(query);
+
+  for (const item of itemsToSearch) {
+    if (item.text.toLowerCase().includes(query.toLowerCase())) {
+      item.span.classList.add('highlight');
+      highlights.push(item);
+    }
+  }
+
+  if (highlights.length === 0 && normalizedQuery) {
+    const pages = Array.from(pageItems.keys());
+    if (preferPage > 0 && pages.includes(preferPage)) {
+      pages.splice(pages.indexOf(preferPage), 1);
+      pages.unshift(preferPage);
+    }
+    for (const pageNumber of pages) {
+      const items = pageItems.get(pageNumber) || [];
+      let pageText = '';
+      const ranges = [];
+      for (const item of items) {
+        const text = normalize(item.text);
+        if (!text) continue;
+        if (pageText) pageText += ' ';
+        const start = pageText.length;
+        pageText += text;
+        ranges.push({item, start, end: pageText.length});
+      }
+      const matchStart = pageText.indexOf(normalizedQuery);
+      if (matchStart < 0) continue;
+      const matchEnd = matchStart + normalizedQuery.length;
+      for (const range of ranges) {
+        if (range.end > matchStart && range.start < matchEnd) {
+          range.item.span.classList.add('highlight');
+          highlights.push(range.item);
+        }
+      }
+      break;
+    }
+  }
+
+  if (highlights.length) {
+    let startIndex = 0;
+    if (preferPage > 0) {
+      const preferred = highlights.findIndex(item => item.pageIdx === preferPage - 1);
+      if (preferred >= 0) startIndex = preferred;
+    }
+    goToMatch(startIndex, false);
+  } else if (preferPage > 0 && pageWrappers[preferPage - 1]) {
+    pageWrappers[preferPage - 1].scrollIntoView({behavior: 'auto', block: 'start'});
+  }
+  updateMatchInfo();
+}
+
+function goToMatch(index, smooth = true) {
+  if (index < 0 || index >= highlights.length) return;
+  if (currentMatch >= 0 && currentMatch < highlights.length) {
+    highlights[currentMatch].span.classList.remove('active');
+  }
+  currentMatch = index;
+  highlights[currentMatch].span.classList.add('active');
+  highlights[currentMatch].span.scrollIntoView({behavior: smooth ? 'smooth' : 'auto', block: 'center'});
+  updateMatchInfo();
+}
+
+function updateMatchInfo() {
+  matchInfo.textContent = highlights.length
+    ? (currentMatch + 1) + ' of ' + highlights.length
+    : (searchInput.value ? 'No text match' : '');
+}
+
+async function searchWholeDocument(query) {
+  if (!query || !pdfDocument) return;
+  const missing = [];
+  for (let pageNumber = 1; pageNumber <= pdfDocument.numPages; pageNumber++) {
+    if (!pageItems.has(pageNumber)) missing.push(pageNumber);
+  }
+  for (let index = 0; index < missing.length; index++) {
+    const percent = 10 + Math.round(((index + 1) / Math.max(1, missing.length)) * 80);
+    setProgress('Searching page ' + missing[index] + ' of ' + pdfDocument.numPages + '…', percent);
+    await renderPage(missing[index]);
+  }
+  doSearch(query, targetPage);
+  hideProgress();
+  notify('ready', {page: targetPage});
+}
+
+async function loadPdf() {
+  if (!pdfUrl) throw new Error('No PDF URL provided');
+  setProgress('Downloading PDF…', 5);
+  const loadingTask = pdfjsLib.getDocument(pdfUrl);
+  loadingTask.onProgress = progress => {
+    if (!progress.total) return;
+    setProgress('Downloading PDF…', Math.round((progress.loaded / progress.total) * 55));
+  };
+  pdfDocument = await loadingTask.promise;
+  targetPage = targetPage > 0 && targetPage <= pdfDocument.numPages ? targetPage : 1;
+  setProgress('Preparing ' + pdfDocument.numPages + ' pages…', 62);
+  createPageSlots(pdfDocument.numPages);
+
+  observer = new IntersectionObserver(entries => {
+    for (const entry of entries) {
+      if (entry.isIntersecting) renderPage(Number(entry.target.dataset.page));
+    }
+  }, {root: container, rootMargin: '900px 0px'});
+  pageWrappers.forEach(wrapper => observer.observe(wrapper));
+
+  const targetItems = await renderPage(targetPage, true);
+  pageWrappers[targetPage - 1].scrollIntoView({behavior: 'auto', block: 'start'});
+  if (initialSearch) {
+    searchInput.value = initialSearch;
+    doSearch(initialSearch, targetPage);
+  }
+
+  const targetTextLength = targetItems.reduce((total, item) => total + item.text.trim().length, 0);
+  if (initialSearch && highlights.length === 0) {
+    const scanned = targetTextLength < 80;
+    // A hybrid scan can expose plenty of unusable text. If native PDF.js search
+    // cannot position the citation, use OCR blocks regardless of text-layer size.
+    const located = await locatePositionedEvidence(targetPage, evidenceText, scanned);
+    if (!located) {
+      const prefix = scanned
+        ? 'Scanned page opened, but OCR could not locate the exact evidence paragraph. '
+        : 'Page opened, but neither native text nor OCR could locate the exact evidence. ';
+      showEvidence(prefix + evidenceText);
+      matchInfo.textContent = scanned ? 'OCR evidence not found' : 'Evidence not found';
+      if (scanned) notify('no-text', {page: targetPage});
+    }
+  }
+  hideProgress();
+  notify('ready', {page: targetPage, matches: highlights.length});
+}
+
+searchInput.addEventListener('input', () => doSearch(searchInput.value, 0));
+searchInput.addEventListener('keydown', event => {
+  if (event.key !== 'Enter') return;
+  if (highlights.length) {
+    const offset = event.shiftKey ? -1 : 1;
+    goToMatch((currentMatch + offset + highlights.length) % highlights.length);
+  } else {
+    searchWholeDocument(searchInput.value);
+  }
+});
+btnNext.addEventListener('click', () => {
+  if (highlights.length) goToMatch((currentMatch + 1) % highlights.length);
+  else searchWholeDocument(searchInput.value);
+});
+btnPrev.addEventListener('click', () => {
+  if (highlights.length) goToMatch((currentMatch - 1 + highlights.length) % highlights.length);
+  else searchWholeDocument(searchInput.value);
+});
+
+loadPdf().catch(error => {
+  console.error(error);
+  loadingStatus.textContent = 'Unable to display this PDF';
+  progressBar.style.width = '100%';
+  notify('error', {status: 'Unable to display this PDF'});
+});
+</script>
+</body>
+</html>

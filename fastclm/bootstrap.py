@@ -6,10 +6,36 @@ from datetime import date, timedelta
 from fastclm.database import get_database
 from fastclm.security import token
 from fastclm.services.contracts import ContractService
+from fastclm.services.documents import DocumentService
 from fastclm.services.identity import IdentityService
+from fastclm.services.assistant import AssistantService
 
 
 DEMO_EMAIL = "owner@fastclm.example"
+
+
+def _demo_pdf(lines: list[str]) -> bytes:
+    """Build a tiny text-layer PDF without adding a demo-only dependency."""
+    escaped = [line.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)") for line in lines]
+    stream = "BT /F1 11 Tf 58 770 Td 15 TL " + " ".join(f"({line}) Tj T*" for line in escaped) + " ET"
+    objects = [
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        f"<< /Length {len(stream.encode())} >>\nstream\n{stream}\nendstream",
+    ]
+    payload = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for number, obj in enumerate(objects, 1):
+        offsets.append(len(payload))
+        payload.extend(f"{number} 0 obj\n{obj}\nendobj\n".encode())
+    xref = len(payload)
+    payload.extend(f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode())
+    for offset in offsets[1:]:
+        payload.extend(f"{offset:010d} 00000 n \n".encode())
+    payload.extend(f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode())
+    return bytes(payload)
 
 
 def initialize() -> None:
@@ -49,7 +75,14 @@ def ensure_demo() -> tuple[dict, dict]:
     service.add_block(actor, msa["id"], "clause", "Liability is capped at fees paid in the preceding twelve months. Neither party has unlimited liability except where mandatory law requires it.")
     service.add_block(actor, msa["id"], "clause", "The parties will comply with UK GDPR and enter Article 28 processor terms where personal data is processed.")
     service.add_block(actor, msa["id"], "clause", "This agreement is governed by the laws of England and Wales. Either party may terminate for material breach after a thirty-day cure period.")
-    service.snapshot(actor, msa["id"], "Negotiated execution draft")
+    DocumentService().ingest(actor, msa["id"], "Northstar-Cloud-MSA.pdf", _demo_pdf([
+        "NORTHSTAR CLOUD MASTER SERVICES AGREEMENT",
+        "Northstar will provide managed cloud hosting, monitoring, support and service reporting.",
+        "This agreement automatically renews for successive twelve-month terms unless either party gives sixty days written notice.",
+        "Liability is capped at fees paid in the preceding twelve months.",
+        "The parties will comply with UK GDPR and enter Article 28 processor terms where personal data is processed.",
+        "This agreement is governed by the laws of England and Wales.",
+    ]))
     service.transition(actor, msa["id"], "review")
     service.transition(actor, msa["id"], "approval")
     service.approve(actor, msa["id"], "approved", "Commercial and data-protection review complete.")
@@ -66,4 +99,5 @@ def ensure_demo() -> tuple[dict, dict]:
     service.add_block(actor, dpa["id"], "clause", "The agreement is governed by German law and may be terminated if the main services agreement ends.")
     service.snapshot(actor, dpa["id"], "Internal review draft")
     service.transition(actor, dpa["id"], "review")
+    AssistantService().seed_demo(actor, msa["id"])
     return user, organisation

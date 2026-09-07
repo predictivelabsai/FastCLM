@@ -8,9 +8,9 @@ from starlette.responses import Response
 
 PRODUCT = 'FastCLM'
 BASE_URL = 'https://clm.fastsme.com'
-DESCRIPTION = 'Upload, review, approve, sign, and manage contracts, obligations, and renewals in one open workspace.'
-KEYWORDS = ('FastCLM', 'open source open contract lifecycle management', 'open contract lifecycle management software', 'SME open contract lifecycle management', 'Immutable contract versions', 'Governed review and approvals', 'Obligations renewals and notice dates', 'FastSME', 'open source business software')
-FEATURES = ('Immutable contract versions', 'Governed review and approvals', 'Obligations renewals and notice dates')
+DESCRIPTION = 'Ask, review, and manage contracts through a source-grounded AI assistant with human-controlled actions.'
+KEYWORDS = ('FastCLM', 'open source AI contract management', 'AI contract assistant', 'open contract lifecycle management software', 'SME contract management', 'contract skills library', 'contract PDF viewer', 'FastSME', 'open source business software')
+FEATURES = ('Source-grounded contract assistant', 'Editable versioned skills', 'Human-confirmed lifecycle actions', 'Authenticated PDF viewer')
 SITEMAP_PATHS = ('/', '/developers')
 
 
@@ -74,6 +74,8 @@ async def robots():
 Allow: /
 Disallow: /admin
 Disallow: /app
+Disallow: /overview
+Disallow: /skills
 Disallow: /auth/
 Disallow: /login
 Disallow: /register

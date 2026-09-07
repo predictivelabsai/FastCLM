@@ -11,6 +11,7 @@ from fastclm.config import settings
 from fastclm.services import documents
 from fastclm.services.contracts import ContractService
 from fastclm.services.documents import DocumentService, extract_text, file_checksum, safe_filename
+from fastclm.services.identity import IdentityService
 
 
 def test_text_document_ingestion_creates_blocks_attachment_and_version(workspace, tmp_path, monkeypatch):
@@ -65,3 +66,46 @@ def test_word_and_text_layer_pdf_extraction():
     pdf_bytes = io.BytesIO()
     writer.write(pdf_bytes)
     assert "Termination requires thirty days notice" in extract_text("agreement.pdf", pdf_bytes.getvalue())
+
+
+def test_inline_pdf_repeats_session_tenant_and_integrity_checks(fresh_db, tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+    import web_app
+
+    upload_dir = tmp_path / "uploads"
+    configured = replace(settings, upload_dir=upload_dir)
+    monkeypatch.setattr(documents, "settings", configured)
+    monkeypatch.setattr(web_app, "settings", configured)
+    with TestClient(web_app.app) as client:
+        client.post("/signup", data={"name": "Taylor", "organisation": "Taylor Studio", "email": "taylor-inline@example.test", "password": "Secure-password1!"})
+        user = fresh_db.one("SELECT id FROM users WHERE email='taylor-inline@example.test'")
+        organisation = IdentityService().memberships(user["id"])[0]
+        actor = IdentityService().actor(user["id"], organisation["organisation_id"])
+        contract = ContractService().create(actor, {"title": "PDF agreement"})
+        version = DocumentService().ingest(actor, contract["id"], "agreement.pdf", _pdf_with_text())
+        response = client.get(f"/versions/{version['id']}/inline")
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "application/pdf"
+        assert response.headers["content-disposition"].startswith("inline;")
+
+        other_user, other_org = IdentityService().create_workspace("other-inline@example.test", "Secure-password2!", "Other", "Other Studio")
+        other_actor = IdentityService().actor(other_user["id"], other_org["id"])
+        other_contract = ContractService().create(other_actor, {"title": "Other PDF"})
+        other_version = DocumentService().ingest(other_actor, other_contract["id"], "other.pdf", _pdf_with_text())
+        assert client.get(f"/versions/{other_version['id']}/inline").status_code == 404
+
+        (upload_dir / version["storage_path"]).write_bytes(b"tampered")
+        assert client.get(f"/versions/{version['id']}/inline").status_code == 409
+
+
+def _pdf_with_text() -> bytes:
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=612, height=792)
+    font = DictionaryObject({NameObject("/Type"): NameObject("/Font"), NameObject("/Subtype"): NameObject("/Type1"), NameObject("/BaseFont"): NameObject("/Helvetica")})
+    page[NameObject("/Resources")] = DictionaryObject({NameObject("/Font"): DictionaryObject({NameObject("/F1"): writer._add_object(font)})})
+    stream = DecodedStreamObject()
+    stream.set_data(b"BT /F1 12 Tf 72 720 Td (This agreement has searchable text.) Tj ET")
+    page[NameObject("/Contents")] = writer._add_object(stream)
+    content = io.BytesIO()
+    writer.write(content)
+    return content.getvalue()

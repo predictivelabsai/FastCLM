@@ -20,14 +20,17 @@ from fastclm.emailer import send_account_action
 from fastclm.reminders import start_scheduler, stop_scheduler
 from fastclm.security import Actor, csrf_valid, token
 from fastclm.services.audit import AuditService
+from fastclm.services.assistant import AssistantService
 from fastclm.services.contracts import ContractService
 from fastclm.services.credentials import clear_xai_key, key_status, store_xai_key, usage
 from fastclm.services.documents import DocumentService, file_checksum
 from fastclm.services.identity import IdentityService
 from fastclm.services.review import ReviewService
 from fastclm.services.signatures import SignatureService
+from fastclm.services.skills import SkillService
 from fastclm.web.ui import (
     audit_page,
+    assistant_page,
     auth_page,
     clauses_page,
     contract_detail_page,
@@ -37,6 +40,8 @@ from fastclm.web.ui import (
     dashboard_page,
     obligations_page,
     settings_page,
+    skill_detail_page,
+    skills_page,
     recovery_page,
 )
 from web.api import api
@@ -249,11 +254,50 @@ def logout(request):
 
 
 @rt("/app")
-def workspace(request):
+def workspace(request, thread: str = "", notice: str = ""):
+    actor = _required(request, "assistant.use")
+    if isinstance(actor, Response):
+        return actor
+    return assistant_page(actor, AssistantService().cockpit(actor, thread), usage(actor.user_id), request.session["csrf_token"], notice)
+
+
+@rt("/overview")
+def overview(request):
     actor = _required(request, "contracts.view")
     if isinstance(actor, Response):
         return actor
     return dashboard_page(actor, ContractService().dashboard(actor))
+
+
+@rt("/assistant/ask", methods=["POST"])
+async def assistant_ask(request):
+    actor, data = await _form(request, "assistant.use")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        AssistantService().ask(
+            actor,
+            str(data.get("thread_id", "")),
+            str(data.get("question", "")),
+            str(data.get("skill_id", "")),
+            str(data.get("contract_id", "")),
+        )
+        return RedirectResponse("/app", status_code=303)
+    except Exception as exc:
+        cockpit = AssistantService().cockpit(actor, str(data.get("thread_id", "")))
+        return assistant_page(actor, cockpit, usage(actor.user_id), request.session["csrf_token"], str(exc))
+
+
+@rt("/assistant/actions/{action_id}", methods=["POST"])
+async def assistant_action(request, action_id: str):
+    actor, data = await _form(request, "assistant.use")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        result = AssistantService().decide(actor, action_id, str(data.get("decision", "")) == "confirm")
+        return RedirectResponse(f"/app?thread={result['thread']['id']}", status_code=303)
+    except Exception as exc:
+        return RedirectResponse(f"/app?notice={quote(str(exc))}", status_code=303)
 
 
 @rt("/contracts")
@@ -386,6 +430,24 @@ def version_download(request, version_id: str):
     return FileResponse(path, media_type=version["media_type"], filename=version["source_filename"])
 
 
+@rt("/versions/{version_id}/inline")
+def version_inline(request, version_id: str):
+    actor = _required(request, "contracts.view")
+    if isinstance(actor, Response):
+        return actor
+    version = get_database().one("SELECT * FROM contract_versions WHERE id=? AND organisation_id=?", (version_id, actor.organisation_id))
+    if not version or not version["storage_path"] or version["media_type"] != "application/pdf":
+        return PlainTextResponse("PDF attachment not found", status_code=404)
+    path = (settings.upload_dir / version["storage_path"]).resolve()
+    root = settings.upload_dir.resolve()
+    if root not in path.parents or not path.is_file():
+        return PlainTextResponse("PDF attachment not found", status_code=404)
+    if version["source_checksum"] and file_checksum(path) != version["source_checksum"]:
+        return PlainTextResponse("Attachment integrity check failed", status_code=409)
+    filename = str(version["source_filename"]).replace('"', "")
+    return FileResponse(path, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{filename}"'})
+
+
 @rt("/contracts/{contract_id}/obligations", methods=["POST"])
 async def obligation_add(request, contract_id: str):
     actor, data = await _form(request, "obligations.manage")
@@ -496,6 +558,53 @@ async def clause_create(request):
         return RedirectResponse("/clauses", status_code=303)
     except Exception as exc:
         return clauses_page(actor, ContractService().clauses(actor), request.session["csrf_token"], str(exc))
+
+
+@rt("/skills", methods=["GET"])
+def skills(request):
+    actor = _required(request, "assistant.use")
+    if isinstance(actor, Response):
+        return actor
+    return skills_page(actor, SkillService().list(actor), request.session["csrf_token"])
+
+
+@rt("/skills", methods=["POST"])
+async def skill_create(request):
+    actor, data = await _form(request, "skills.manage")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        skill = SkillService().create(actor, dict(data))
+        return RedirectResponse(f"/skills/{skill['id']}", status_code=303)
+    except Exception as exc:
+        return skills_page(actor, SkillService().list(actor), request.session["csrf_token"], str(exc))
+
+
+@rt("/skills/{skill_id}", methods=["GET"])
+def skill_detail(request, skill_id: str):
+    actor = _required(request, "assistant.use")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        return skill_detail_page(actor, SkillService().get(actor, skill_id), request.session["csrf_token"])
+    except LookupError:
+        return PlainTextResponse("Skill not found", status_code=404)
+
+
+@rt("/skills/{skill_id}", methods=["POST"])
+async def skill_update(request, skill_id: str):
+    actor, data = await _form(request, "skills.manage")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        skill = SkillService().update(actor, skill_id, dict(data))
+        return RedirectResponse(f"/skills/{skill['id']}", status_code=303)
+    except Exception as exc:
+        try:
+            skill = SkillService().get(actor, skill_id)
+        except LookupError:
+            return PlainTextResponse("Skill not found", status_code=404)
+        return skill_detail_page(actor, skill, request.session["csrf_token"], str(exc))
 
 
 @rt("/audit")

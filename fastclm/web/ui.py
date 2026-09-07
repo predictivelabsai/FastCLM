@@ -29,7 +29,8 @@ def head(title: str, description: str = "Open-source contract lifecycle manageme
         Link(rel="preconnect", href="https://fonts.googleapis.com"),
         Link(rel="preconnect", href="https://fonts.gstatic.com", crossorigin=""),
         Link(rel="stylesheet", href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Newsreader:opsz,wght@6..72,600&display=swap"),
-        Link(rel="stylesheet", href="/static/app.css?v=1"),
+        Link(rel="stylesheet", href="/static/app.css?v=3"),
+        Script(src="/static/app.js?v=2", defer=True),
     )
 
 
@@ -108,11 +109,13 @@ def recovery_page(mode: str, token_value: str = "", error: str = "", notice: str
 
 
 NAV = (
-    ("Overview", "/app", "dashboard", "contracts.view"),
+    ("AI Assistant", "/app", "assistant", "assistant.use"),
+    ("Overview", "/overview", "dashboard", "contracts.view"),
     ("Contracts", "/contracts", "contracts", "contracts.view"),
     ("Obligations", "/obligations", "obligations", "contracts.view"),
     ("Counterparties", "/counterparties", "counterparties", "contracts.view"),
     ("Clause library", "/clauses", "clauses", "contracts.view"),
+    ("Skills library", "/skills", "skills", "assistant.use"),
     ("Audit trail", "/audit", "audit", "audit.view"),
     ("Settings", "/settings", "settings", None),
 )
@@ -182,6 +185,99 @@ def dashboard_page(actor: Actor, data: dict) -> Html:
     return shell(actor, "dashboard", "Overview", content)
 
 
+def _assistant_message(message: dict, csrf: str) -> Div:
+    sources = []
+    for source in message.get("citations", []):
+        viewer = source.get("media_type") == "application/pdf" and source.get("filename")
+        action = (
+            Button("Open PDF", type="button", cls="source-open", onclick=f"openPdf('/versions/{source['version_id']}/inline', {json.dumps(source['filename'])})")
+            if viewer else A("Open contract", href=f"/contracts/{source['contract_id']}", cls="source-open")
+        )
+        sources.append(Div(Span(f"[{source['number']}]", cls="source-number"), Div(Strong(source["title"]), Small(f"{source['reference']} · version {source['version']}")), action, cls="assistant-source"))
+    actions = []
+    for item in message.get("actions", []):
+        pending = item["status"] == "pending"
+        actions.append(Div(
+            Div(Span("HUMAN APPROVAL REQUIRED", cls="eyebrow"), H4(item["summary"]), P(item["tool_name"].replace("_", " ").title(), cls="muted")),
+            Div(
+                Form(Input(type="hidden", name="csrf", value=csrf), Input(type="hidden", name="decision", value="confirm"), Button("Confirm action", cls="button small"), action=f"/assistant/actions/{item['id']}", method="post") if pending else None,
+                Form(Input(type="hidden", name="csrf", value=csrf), Input(type="hidden", name="decision", value="cancel"), Button("Dismiss", cls="button secondary small"), action=f"/assistant/actions/{item['id']}", method="post") if pending else status_badge(item["status"]),
+                cls="inline-actions",
+            ),
+            cls="assistant-proposal",
+        ))
+    return Div(
+        Div(Span("You" if message["role"] == "user" else "AI", cls="message-avatar"), Div(P(message["content"], cls="message-copy"), Div(*sources, cls="assistant-sources") if sources else None, *actions), cls="message-inner"),
+        cls=f"assistant-message {message['role']}",
+    )
+
+
+def assistant_page(actor: Actor, data: dict, usage: dict, csrf: str, notice: str = "") -> Html:
+    contracts = data["contracts"]
+    skills = data["skills"]
+    content = Div(
+        Div(
+            Div(
+                P("CONTRACT WORKSPACE", cls="eyebrow"),
+                H2(data["thread"]["title"]),
+                P("Ask, investigate, compare, and prepare work from one conversation.", cls="muted"),
+                Div(notice, cls="alert error assistant-alert") if notice else None,
+            ),
+            Div(Span("xAI", cls="assistant-model"), Span(f"{usage['remaining']} included" if not usage["has_byok"] else "BYOK active", cls="muted"), cls="inline-actions"),
+            cls="assistant-head",
+        ),
+        Div(*[_assistant_message(message, csrf) for message in data["messages"]], id="assistant-messages", cls="assistant-messages"),
+        Form(
+            Input(type="hidden", name="csrf", value=csrf),
+            Input(type="hidden", name="thread_id", value=data["thread"]["id"]),
+            Textarea(name="question", id="assistant-question", rows="3", required=True, placeholder="Ask about a contract, compare terms, find an obligation, or prepare an action…"),
+            Div(
+                Select(Option("Use best skill", value=""), *[Option(item["name"], value=item["id"]) for item in skills], name="skill_id", aria_label="Assistant skill"),
+                Select(Option("All contracts", value=""), *[Option(f"{item['reference']} · {item['title']}", value=item["id"]) for item in contracts], name="contract_id", aria_label="Contract context"),
+                Button("Ask FastCLM", cls="button", id="assistant-send"),
+                cls="assistant-compose-actions",
+            ),
+            action="/assistant/ask", method="post", id="assistant-form", cls="assistant-composer",
+        ),
+        cls="assistant-center",
+    )
+    rail = Aside(
+        Section(Div(H3("Active context"), Span("READ ONLY", cls="context-safe"), cls="subhead"), P("The assistant searches only contracts and versions in this workspace.", cls="muted"), Div(*[A(Div(Strong(item["title"]), Small(item["reference"])), status_badge(item["status"]), href=f"/contracts/{item['id']}", cls="context-contract") for item in contracts[:4]], cls="context-list"), cls="assistant-rail-section"),
+        Section(Div(H3("Capabilities"), A("Edit library", href="/skills", cls="quiet-link"), cls="subhead"), Div(*[A(Div(Strong(item["name"]), Small(item["description"])), Span(f"v{item['current_version']}", cls="skill-version"), href=f"/skills/{item['id']}", cls="capability-card") for item in skills], cls="capability-list"), cls="assistant-rail-section"),
+        Section(H3("Control boundary"), P("Sources are visible. Record changes are proposals until you confirm them. The assistant cannot approve, sign, activate, terminate, or alter access on its own.", cls="control-note"), cls="assistant-rail-section"),
+        cls="assistant-rail",
+    )
+    page = Div(content, rail, cls="assistant-cockpit")
+    return shell(actor, "assistant", "AI Assistant", Div(page, Div(Div(Div(Strong(id="pdf-title"), Button("×", type="button", onclick="closePdf()", cls="pdf-close"), cls="pdf-head"), Iframe(id="pdf-frame", title="Contract PDF viewer"), cls="pdf-drawer"), id="pdf-overlay", cls="pdf-overlay", onclick="if(event.target===this)closePdf()")))
+
+
+def skills_page(actor: Actor, skills: list[dict], csrf: str, error: str = "") -> Html:
+    items = [A(Div(Div(Span(item["jurisdiction"], cls="status low"), Span(f"v{item['current_version']}", cls="skill-version"), cls="record-card-top"), H3(item["name"]), P(item["description"]), Div(Span("Readable instructions"), Span("Edit →"), cls="record-card-foot")), href=f"/skills/{item['id']}", cls="record-card") for item in skills]
+    content = Div(
+        page_intro("SKILLS LIBRARY", "Make the assistant's legal workflows visible", "Every capability is readable Markdown. Authorised users can edit it; every save creates an immutable version."),
+        Div(error, cls="alert error") if error else None,
+        Div(*items, cls="record-grid"),
+        Details(Summary("Create a new skill"), Form(Input(type="hidden", name="csrf", value=csrf), Label("Name", Input(name="name", required=True)), Label("Description", Input(name="description", required=True)), Label("Jurisdiction", Input(name="jurisdiction", value="UK / EU")), Label("Instructions (Markdown)", Textarea(name="instructions", rows="12", required=True, placeholder="# Skill name\n\nDescribe triggers, workflow, output, and boundaries.")), Button("Create skill", cls="button"), action="/skills", method="post", cls="panel form-stack"), cls="skill-create" ) if actor.can("skills.manage") else None,
+        cls="page-scroll",
+    )
+    return shell(actor, "skills", "Skills library", content)
+
+
+def skill_detail_page(actor: Actor, skill: dict, csrf: str, error: str = "") -> Html:
+    versions = [Div(Strong(f"Version {item['version_number']}"), Small(f"{item['author_name'] or 'System'} · {item['jurisdiction']}"), Small(item["created_at"]), cls="version-row") for item in skill["versions"]]
+    editor = Form(
+        Input(type="hidden", name="csrf", value=csrf),
+        Div(Label("Name", Input(name="name", value=skill["name"], required=True)), Label("Jurisdiction", Input(name="jurisdiction", value=skill["jurisdiction"], required=True)), cls="form-row"),
+        Label("When to use this skill", Textarea(skill["description"], name="description", rows="3", required=True)),
+        Div(Div(Button("Prose", type="button", cls="editor-mode active", onclick="setSkillMode('prose')"), Button("Markdown", type="button", cls="editor-mode", onclick="setSkillMode('markdown')"), cls="editor-modes"), Span(f"Version {skill['current_version']} · every save keeps history", cls="muted"), cls="subhead"),
+        Label("Skill instructions", Textarea(skill["instructions"], name="instructions", id="skill-instructions", rows="24", required=True, cls="skill-editor")),
+        Button("Save as new version", cls="button"),
+        action=f"/skills/{skill['id']}", method="post", cls="panel form-stack",
+    ) if actor.can("skills.manage") else Pre(skill["instructions"], cls="panel skill-preview")
+    content = Div(A("← Skills library", href="/skills", cls="back-link"), Div(error, cls="alert error") if error else None, Div(Section(editor), Section(H3("Version history"), P("Published versions are immutable and attributable.", cls="muted"), Div(*versions, cls="table-card"), cls="panel"), cls="two-column"), cls="page-scroll")
+    return shell(actor, "skills", skill["name"], content)
+
+
 def contracts_page(actor: Actor, records: list[dict], q: str = "", selected_status: str = "") -> Html:
     cards = [
         A(
@@ -233,7 +329,7 @@ def contract_detail_page(actor: Actor, contract: dict, counterparties: list[dict
     editable = actor.can("contracts.edit") and contract["status"] in {"draft", "review"}
     allowed_transitions = [target for target in contract["next_statuses"] if not (contract["status"] == "approval" and target == "signature")]
     transitions = [Form(Input(type="hidden", name="csrf", value=csrf), Input(type="hidden", name="target", value=target), Button(f"Move to {target.title()}", cls="button small"), action=f"/contracts/{contract['id']}/transition", method="post") for target in allowed_transitions] if actor.can("contracts.transition") else []
-    versions = [Div(Strong(f"Version {item['version_number']} · {item['label'] or 'Saved version'}"), Small(f"{item['source_filename'] or 'Edited in FastCLM'} · {item['created_at']}"), P(item["checksum"], cls="checksum"), cls="version-row") for item in contract["versions"]]
+    versions = [Div(Div(Strong(f"Version {item['version_number']} · {item['label'] or 'Saved version'}"), Small(f"{item['source_filename'] or 'Edited in FastCLM'} · {item['created_at']}")), Div(A("View PDF", href=f"/versions/{item['id']}/inline", target="_blank", cls="button secondary small") if item["media_type"] == "application/pdf" else None, A("Download", href=f"/versions/{item['id']}/download", cls="quiet-link") if item["storage_path"] else None, cls="inline-actions"), P(item["checksum"], cls="checksum"), cls="version-row") for item in contract["versions"]]
     obligations = [Div(Div(H3(item["title"]), P(item["description"], cls="muted")), Div(status_badge(item["status"]), Small(item["due_date"] or "No due date"), cls="table-meta"), cls="table-row") for item in contract["obligations"]]
     approvals = [Div(Div(H3(item["approver_name"]), P(item["comment"] or "No comment", cls="muted")), Div(status_badge(item["decision"]), Small(item["decided_at"]), cls="table-meta"), cls="table-row") for item in contract["approvals"]]
     signatures = [Div(Div(H3(f"{item['provider'].title()} · {item['recipient_name']}"), P(item["recipient_email"], cls="muted")), status_badge(item["status"]), cls="table-row") for item in contract["signatures"]]
@@ -316,7 +412,7 @@ def contract_detail_page(actor: Actor, contract: dict, counterparties: list[dict
                 cls="section-stack",
             ),
             Div(
-                Section(H3("Contract review"), P("Rule-based review is always available. xAI provides a deeper assistive review and never changes approval or lifecycle state.", cls="muted"), Div(Span(f"{usage['remaining']} of {usage['limit']} included reviews remain" if not usage["has_byok"] else "Using your encrypted xAI key", cls="callout")), Form(Input(type="hidden", name="csrf", value=csrf), Input(type="hidden", name="use_ai", value="false"), Button("Run local review", cls="button secondary full"), action=f"/contracts/{contract['id']}/review", method="post"), Form(Input(type="hidden", name="csrf", value=csrf), Input(type="hidden", name="use_ai", value="true"), Button("Review with xAI", cls="button full"), action=f"/contracts/{contract['id']}/review", method="post"), *findings, cls="panel form-stack"),
+                Section(H3("Contract review"), P("Rule-based review is always available. xAI provides a deeper assistive review and never changes approval or lifecycle state.", cls="muted"), Div(Span(f"{usage['remaining']} of {usage['limit']} shared AI queries remain" if not usage["has_byok"] else "Using your encrypted xAI key", cls="callout")), Form(Input(type="hidden", name="csrf", value=csrf), Input(type="hidden", name="use_ai", value="false"), Button("Run local review", cls="button secondary full"), action=f"/contracts/{contract['id']}/review", method="post"), Form(Input(type="hidden", name="csrf", value=csrf), Input(type="hidden", name="use_ai", value="true"), Button("Review with xAI", cls="button full"), action=f"/contracts/{contract['id']}/review", method="post"), *findings, cls="panel form-stack"),
                 Section(H3("Approval decisions"), Div(*approvals, cls="table-card") if approvals else P("No decisions recorded.", cls="muted"), Form(Input(type="hidden", name="csrf", value=csrf), Select(Option("Approve", value="approved"), Option("Request changes", value="changes_requested"), name="decision"), Textarea(name="comment", rows="2", placeholder="Decision rationale"), Button("Record decision", cls="button"), action=f"/contracts/{contract['id']}/approval", method="post", cls="form-stack") if actor.can("contracts.approve") and contract["status"] == "approval" else None, cls="panel"),
                 Section(H3("Electronic signature"), P("Prepare a provider payload for review. No envelope or document is sent automatically.", cls="muted"), Div(*signatures, cls="table-card") if signatures else None, Form(Input(type="hidden", name="csrf", value=csrf), Select(Option("SignWell", value="signwell"), Option("DocuSign", value="docusign"), name="provider"), Input(name="recipient_name", placeholder="Signer name", required=True), Input(type="email", name="recipient_email", placeholder="signer@example.com", required=True), Button("Prepare signature request", cls="button"), action=f"/contracts/{contract['id']}/signatures", method="post", cls="form-stack") if actor.can("contracts.transition") and contract["status"] == "signature" else None, cls="panel"),
                 cls="section-stack",
@@ -356,7 +452,7 @@ def audit_page(actor: Actor, rows: list[dict]) -> Html:
 
 def settings_page(actor: Actor, key: dict, usage: dict, csrf: str, notice: str = "") -> Html:
     content = Div(
-        page_intro("SETTINGS", "AI review and workspace access", "FastCLM includes five platform-funded xAI reviews per user. Add your own key to continue without using that allowance."),
+        page_intro("SETTINGS", "AI assistant and workspace access", "FastCLM includes five platform-funded xAI queries per user, shared across assistant chat and review. Add your own key to continue without using that allowance."),
         Div(notice, cls="alert success") if notice else None,
         Div(
             Section(H3("AI usage"), Div(stat("Included used", f"{usage['used']} / {usage['limit']}"), stat("Remaining", usage["remaining"]), cls="form-row"), P("Your saved key is used before the platform key and does not consume the included allowance.", cls="muted"), cls="panel"),

@@ -7,7 +7,8 @@ def test_public_landing_health_and_developer_surface(fresh_db):
     with TestClient(app) as client:
         landing = client.get("/")
         assert landing.status_code == 200
-        assert "Know what you agreed" in landing.text
+        assert "Ask your contracts" in landing.text
+        assert 'src="/static/product-demo.gif"' in landing.text
         assert "Sign In" in landing.text
         assert 'href="/developers"' in landing.text
         assert 'href="/api/docs"' in landing.text
@@ -25,6 +26,7 @@ def test_public_landing_health_and_developer_surface(fresh_db):
         assert "clm.fastsme.com/developers" in client.get("/sitemap.xml").text
         robots = client.get("/robots.txt").text
         assert "Disallow: /app" in robots
+        assert "Disallow: /skills" in robots
         assert "Disallow: /api/" in robots
 
 
@@ -35,4 +37,4 @@ def test_signup_creates_authenticated_workspace(fresh_db):
         response = client.post("/signup", data={"name": "Taylor", "organisation": "Taylor Studio", "email": "taylor@example.test", "password": "Secure-password1!"})
         assert response.status_code == 200
         assert response.url.path == "/app"
-        assert "The agreements that need attention" in response.text
+        assert "Ask, investigate, compare" in response.text

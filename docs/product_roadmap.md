@@ -12,18 +12,28 @@ Updated: 2026-09-07
 - Word `.docx`, text, Markdown, and text-layer PDF ingestion; FastDocs-style
   editable blocks; immutable checksummed versions.
 - UK/EU starter clause library and assistive deterministic/xAI review.
-- Five per-user platform-funded xAI reviews followed by encrypted BYOK.
+- Five per-user platform-funded xAI queries, shared by assistant and review,
+  followed by encrypted BYOK.
 - Idempotent, retry-safe Postmark obligation reminder scheduler.
 - Reviewable DocuSign and SignWell payload stubs.
 - Private integration API with fleet-compatible discovery, pagination,
   generated documentation and committed OpenAPI; Docker/Coolify assets; and
   responsive public/product surfaces.
+- Assistant-first legal-work cockpit with persistent conversations,
+  organisation-scoped retrieval, source cards, an authenticated PDF.js pane,
+  and confirmation-gated write proposals.
+- Transparent, editable Markdown skills library with four starter contract
+  capabilities and immutable, attributable version history.
+- Deterministic Playwright product capture, validated screenshot manifest,
+  README walkthrough, and the same animated walkthrough on the landing page.
 
 ## Next production increments
 
 - Team invitations, role administration, organisation switching, and SCIM.
 - OCR for scanned PDFs, malware scanning, object storage, retention controls,
   and encrypted backups.
+- Streaming assistant activity, character-level citation verification,
+  multi-matter memory, and conversational skill creation/refinement.
 - Clause insertion, redlining/diff, comments, mentions, assignments, template
   assembly, and negotiated fallback playbooks.
 - Configurable multi-stage approval policies with delegation and separation of

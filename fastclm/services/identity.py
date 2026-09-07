@@ -47,6 +47,8 @@ class IdentityService:
             tx.execute("INSERT INTO memberships(organisation_id,user_id,role,created_at) VALUES (?,?,?,?)", (organisation_id, user_id, "owner", created))
             tx.execute("INSERT INTO user_ai_allowances(user_id,platform_queries_used,updated_at) VALUES (?,0,?)", (user_id, created))
         self.seed_clauses(organisation_id)
+        from fastclm.services.skills import SkillService
+        SkillService().seed(organisation_id, user_id)
         return self.user(user_id), self.organisation(organisation_id)
 
     def authenticate(self, email: str, password: str) -> dict | None:
@@ -76,6 +78,8 @@ class IdentityService:
             tx.execute("INSERT INTO memberships(organisation_id,user_id,role,created_at) VALUES (?,?,?,?)", (organisation_id, user_id, "owner", created))
             tx.execute("INSERT OR IGNORE INTO user_ai_allowances(user_id,platform_queries_used,updated_at) VALUES (?,0,?)", (user_id, created))
         self.seed_clauses(organisation_id)
+        from fastclm.services.skills import SkillService
+        SkillService().seed(organisation_id, user_id)
         return self.user(user_id), self.organisation(organisation_id)
 
     def memberships(self, user_id: str) -> list[dict]:

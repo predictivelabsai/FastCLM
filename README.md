@@ -7,6 +7,14 @@ mid-sized organisations. It keeps contracts, counterparties, immutable
 versions, clause knowledge, approval decisions, obligations, renewals, and an
 append-only audit trail in one focused system.
 
+![FastCLM product walkthrough](docs/demo/fastclm-walkthrough.gif)
+
+[AI assistant](screenshots/02-ai-assistant.png) ·
+[grounded PDF source](screenshots/03-pdf-source.png) ·
+[skills library](screenshots/04-skills-library.png) ·
+[skill editor](screenshots/05-skill-editor.png) ·
+[contract record](screenshots/08-contract-record.png)
+
 The default installation needs no external services. It runs on FastHTML with
 SQLite, local authentication, deterministic synthetic demonstration data, and
 a conservative contract review that works without an AI key. Google OpenID
@@ -16,6 +24,14 @@ Connect and a token-gated integration API are optional.
 
 - Organisation-isolated workspaces with owner, administrator, legal,
   approver, and member roles.
+- Assistant-first contract workspace with persistent conversations,
+  organisation-scoped document retrieval, visible source versions, and xAI.
+- Confirmation-gated action proposals: the assistant can prepare work but
+  cannot silently approve, sign, activate, terminate, or change access.
+- Transparent organisation skill library with editable Markdown instructions,
+  starter contract workflows, and immutable version history.
+- Source-aware PDF.js side pane for checking an answer against the uploaded
+  original without leaving the conversation.
 - Contract register with search, status filters, counterparties, commercial
   value, dates, ownership, renewal terms, and risk level.
 - Reviewed lifecycle transitions from draft through review, approval,
@@ -58,11 +74,13 @@ Disable that route in production.
 ## Routes
 
 - Public landing: `/`
-- Workspace: `/app`
+- AI assistant workspace: `/app`
+- Operational overview: `/overview`
 - Contract register: `/contracts`
 - Obligations: `/obligations`
 - Counterparties: `/counterparties`
 - Clause library: `/clauses`
+- Skills library: `/skills`
 - Audit trail: `/audit`
 - Developer guide: `/developers`
 - API discovery: `/api/`
@@ -77,6 +95,20 @@ The container listens on port `5025`, stores runtime data under `/data`, and
 publishes a health check at `/healthz`. See [DEPLOY.md](DEPLOY.md) for the
 Coolify variables and DNS/TLS checklist.
 
+## Product walkthrough
+
+The walkthrough is generated only from the synthetic Acme Studio workspace.
+It intentionally contains no production agreements or saved browser profile.
+
+```bash
+.venv/bin/python scripts/capture_demo.py
+scripts/build_demo_gif.sh
+```
+
+The capture script validates browser console output and writes its ordered
+frame list to `screenshots/manifest.txt`. The GIF builder refuses missing
+frames and publishes identical copies for this README and the landing page.
+
 ## Security
 
 Contract content is private. API data routes are disabled until
@@ -85,6 +117,9 @@ explicit organisation header. API writes also require an authorised member ID
 for permission checks and audit attribution. Uploaded files are stored outside
 the source tree and served only after session, tenant, and original-file
 checksum checks. Review findings are assistive signals, not legal advice.
+PDF sources use the same checks before inline viewing. Skill instructions and
+assistant messages are workspace-scoped. Assistant answers are assistive
+signals, not legal advice.
 
 FastCLM ships with synthetic data only. Do not load production agreements into
 an unreviewed demo deployment.

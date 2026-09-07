@@ -71,7 +71,7 @@ def authorize(user_id: str) -> tuple[str, str, bool]:
     if own_key:
         return own_key, "byok", False
     if not settings.xai_api_key:
-        raise QueryLimitExceeded("AI review is not configured. Add your own xAI API key in Settings.")
+        raise QueryLimitExceeded("AI is not configured. Add your own xAI API key in Settings.")
     with get_database().transaction() as tx:
         tx.execute("INSERT OR IGNORE INTO user_ai_allowances(user_id,platform_queries_used,updated_at) VALUES (?,0,?)", (user_id, now()))
         row = tx.one(
@@ -80,7 +80,7 @@ def authorize(user_id: str) -> tuple[str, str, bool]:
             (now(), user_id, settings.free_query_limit),
         )
     if not row:
-        raise QueryLimitExceeded(f"Your {settings.free_query_limit} included AI reviews are used. Add your xAI API key in Settings to continue.")
+        raise QueryLimitExceeded(f"Your {settings.free_query_limit} included AI queries are used. Add your xAI API key in Settings to continue.")
     return settings.xai_api_key, "platform", True
 
 
