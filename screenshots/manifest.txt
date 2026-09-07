@@ -9,3 +9,4 @@
 10-developers.png
 13-team.png
 14-settings-security.png
+15-approval-governance.png

@@ -41,11 +41,12 @@ Updated: 2026-09-07
 - Clause and fallback insertion, reviewable redline diffs, comments and member
   mentions, review assignments, template-based first drafts, and reusable
   negotiation playbooks; accepted wording always creates a version.
+- Configurable ordered approval policies with stage quorums, role and named
+  assignee eligibility, requester exclusion, separation of duties, bounded
+  delegation, and attributable direct/delegated decision evidence.
 
 ## Next production increments
 
-- Configurable multi-stage approval policies with delegation and separation of
-  duties.
 - Explicitly confirmed SignWell/DocuSign dispatch, webhook signature
   verification, signer status, completed-PDF retrieval, and evidence trails.
 - Reminder preferences, escalation paths, and Postmark templates.

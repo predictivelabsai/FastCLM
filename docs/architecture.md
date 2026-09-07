@@ -17,6 +17,7 @@ Word / PDF ─ extraction ──────┼─ immutable contract versions
        └ page provenance       ├─ retention + encrypted tenant backups
                               ├─ versioned Markdown skills
                               ├─ redlines + collaborative review work
+                              ├─ staged approval runs + delegation evidence
                               ├─ templates + fallback playbooks
                               ├─ deterministic / xAI review
                               ├─ Postmark reminder runner
@@ -34,6 +35,11 @@ SCIM /scim/v2 ─ bearer + organisation ─ memberships + audit
 - Contract lifecycle state changes use `fastclm.lifecycle`. The assistant can
   propose a permitted action, but a user must confirm it and the existing
   service permission and lifecycle checks still run.
+- Approval entry creates an ordered run from a tenant policy. Stage decisions
+  enforce quorum, eligible roles or named assignees, requester exclusions, and
+  optional distinct prior approvers. A bounded delegate acts for an eligible
+  delegator while both identities remain in the evidence record. Only final
+  workflow completion advances to signature through the lifecycle catalogue.
 - API data routes require a server bearer token and an explicit valid
   organisation header. Writes additionally require an authorised workspace
   member ID so role checks and audit attribution are preserved. The API is

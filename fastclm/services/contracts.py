@@ -208,12 +208,27 @@ class ContractService:
         item = self._contract(actor, contract_id)
         require_transition(item["status"], target)
         if item["status"] == "approval" and target == "signature":
-            raise ValueError("Record an approval decision to move the contract to signature")
+            approved_run = get_database().scalar(
+                "SELECT COUNT(*) FROM contract_approval_runs WHERE contract_id=? AND organisation_id=? AND status='approved'",
+                (contract_id, actor.organisation_id),
+            )
+            legacy_approval = get_database().scalar(
+                "SELECT COUNT(*) FROM approvals WHERE contract_id=? AND organisation_id=? AND decision='approved'",
+                (contract_id, actor.organisation_id),
+            )
+            if not approved_run and not legacy_approval:
+                raise ValueError("Complete the approval workflow to move the contract to signature")
         if target == "active" and not get_database().scalar("SELECT COUNT(*) FROM approvals WHERE contract_id=? AND decision='approved'", (contract_id,)):
             raise ValueError("At least one recorded approval is required before activation")
         with get_database().transaction() as tx:
             tx.execute("UPDATE contracts SET status=?,updated_at=? WHERE id=? AND organisation_id=?", (target, now(), contract_id, actor.organisation_id))
             AuditService().record(actor, "contract", contract_id, "contract.transitioned", {"from": item["status"], "to": target}, tx)
+        from fastclm.services.approvals import ApprovalService
+
+        if target == "approval":
+            ApprovalService().ensure_run(actor, contract_id)
+        elif item["status"] == "approval" and target != "signature":
+            ApprovalService().cancel_active(actor, contract_id)
         return self._contract(actor, contract_id)
 
     def blocks(self, actor: Actor, contract_id: str) -> list[dict]:
@@ -309,19 +324,9 @@ class ContractService:
             AuditService().record(actor, "obligation", obligation_id, "obligation.completed", {"contract_id": row["contract_id"]}, tx)
 
     def approve(self, actor: Actor, contract_id: str, decision: str, comment: str = "") -> dict:
-        actor.require("contracts.approve")
-        item = self._contract(actor, contract_id)
-        if item["status"] != "approval":
-            raise ValueError("Contract is not awaiting approval")
-        if decision not in {"approved", "changes_requested"}:
-            raise ValueError("Unsupported approval decision")
-        approval_id, decided = new_id(), now()
-        target = "signature" if decision == "approved" else "review"
-        with get_database().transaction() as tx:
-            tx.execute("INSERT INTO approvals(id,organisation_id,contract_id,approver_user_id,decision,comment,decided_at) VALUES (?,?,?,?,?,?,?)", (approval_id, actor.organisation_id, contract_id, actor.user_id, decision, comment.strip(), decided))
-            tx.execute("UPDATE contracts SET status=?,updated_at=? WHERE id=?", (target, decided, contract_id))
-            AuditService().record(actor, "contract", contract_id, "approval.recorded", {"decision": decision, "to": target}, tx)
-        return get_database().one("SELECT * FROM approvals WHERE id=?", (approval_id,))
+        from fastclm.services.approvals import ApprovalService
+
+        return ApprovalService().decide_contract(actor, contract_id, decision, comment)
 
     def obligations(self, actor: Actor, status: str = "open") -> list[dict]:
         actor.require("contracts.view")

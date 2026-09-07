@@ -4,7 +4,7 @@
 
 FastCLM is an open-source contract lifecycle management workspace for small and
 mid-sized organisations. It keeps contracts, counterparties, immutable
-versions, clause knowledge, approval decisions, obligations, renewals, and an
+versions, clause knowledge, staged approval decisions, obligations, renewals, and an
 append-only audit trail in one focused system.
 
 ![FastCLM product walkthrough](docs/demo/fastclm-walkthrough.gif)
@@ -47,6 +47,8 @@ Connect and a token-gated integration API are optional.
   value, dates, ownership, renewal terms, and risk level.
 - Reviewed lifecycle transitions from draft through review, approval,
   signature, active, expiry, or termination.
+- Multi-stage approval policies with quorum, requester exclusion, separation
+  of duties, named assignees, and time-bounded attributable delegation.
 - Immutable text/file version history with SHA-256 integrity checks.
 - Collaborative clause insertion, reviewable before/after redlines, comments,
   workspace mentions, assigned review work, template assembly, and negotiation

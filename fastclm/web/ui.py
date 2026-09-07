@@ -112,6 +112,7 @@ NAV = (
     ("AI Assistant", "/app", "assistant", "assistant.use"),
     ("Overview", "/overview", "dashboard", "contracts.view"),
     ("Contracts", "/contracts", "contracts", "contracts.view"),
+    ("Approvals", "/approval-policies", "approvals", "contracts.view"),
     ("Obligations", "/obligations", "obligations", "contracts.view"),
     ("Counterparties", "/counterparties", "counterparties", "contracts.view"),
     ("Clause library", "/clauses", "clauses", "contracts.view"),
@@ -369,7 +370,7 @@ def _editor(contract: dict, csrf: str, editable: bool):
     return Div(*blocks)
 
 
-def contract_detail_page(actor: Actor, contract: dict, counterparties: list[dict], drafting: dict, csrf: str, usage: dict, notice: str = "") -> Html:
+def contract_detail_page(actor: Actor, contract: dict, counterparties: list[dict], drafting: dict, approval_workflow: dict, csrf: str, usage: dict, notice: str = "") -> Html:
     editable = actor.can("contracts.edit") and contract["status"] in {"draft", "review"}
     allowed_transitions = [target for target in contract["next_statuses"] if not (contract["status"] == "approval" and target == "signature")]
     transitions = [Form(Input(type="hidden", name="csrf", value=csrf), Input(type="hidden", name="target", value=target), Button(f"Move to {target.title()}", cls="button small"), action=f"/contracts/{contract['id']}/transition", method="post") for target in allowed_transitions] if actor.can("contracts.transition") else []
@@ -395,6 +396,28 @@ def contract_detail_page(actor: Actor, contract: dict, counterparties: list[dict
     ) for item in contract["versions"]]
     obligations = [Div(Div(H3(item["title"]), P(item["description"], cls="muted")), Div(status_badge(item["status"]), Small(item["due_date"] or "No due date"), cls="table-meta"), cls="table-row") for item in contract["obligations"]]
     approvals = [Div(Div(H3(item["approver_name"]), P(item["comment"] or "No comment", cls="muted")), Div(status_badge(item["decision"]), Small(item["decided_at"]), cls="table-meta"), cls="table-row") for item in contract["approvals"]]
+    approval_run = approval_workflow.get("run")
+    approval_stages = []
+    for stage in approval_workflow.get("stages", []):
+        decisions = [Div(
+            Div(Strong(item["actor_name"]), Small(f"For {item['represented_name']}" if item["actor_user_id"] != item["represented_user_id"] else "Direct decision")),
+            Div(status_badge(item["decision"]), Small(item["decided_at"]), cls="table-meta"),
+            cls="table-row",
+        ) for item in stage["decisions"]]
+        assignments = ", ".join(item["user_name"] for item in stage["assignments"]) or "Any eligible role"
+        state = "active" if approval_run and approval_run["status"] == "active" and stage["position"] == approval_run["current_stage_position"] else ("complete" if approval_run and stage["position"] < approval_run["current_stage_position"] else "pending")
+        approval_stages.append(Div(
+            Div(Div(Strong(f"{stage['position']}. {stage['name']}"), Small(f"{stage['required_approvals']} required · {assignments}")), status_badge(state), cls="subhead"),
+            P(f"Roles: {', '.join(stage['allowed_roles'])} · Requester {'allowed' if stage['allow_requester'] else 'excluded'} · {'Different approver required' if stage['require_distinct_prior'] else 'Prior approver may participate'}", cls="muted"),
+            Div(*decisions, cls="table-card") if decisions else None,
+            Form(
+                Input(type="hidden", name="csrf", value=csrf),
+                Select(*[Option(f"{item['name']} · {item['role']}", value=item["user_id"]) for item in approval_workflow.get("members", []) if item["role"] in stage["allowed_roles"]], name="user_id"),
+                Button("Assign approver", cls="button secondary small"),
+                action=f"/approval-runs/{approval_run['id']}/stages/{stage['id']}/assign", method="post", cls="inline-actions",
+            ) if actor.can("team.manage") and approval_run and approval_run["status"] == "active" else None,
+            cls="finding",
+        ))
     signatures = [Div(Div(H3(f"{item['provider'].title()} · {item['recipient_name']}"), P(item["recipient_email"], cls="muted")), status_badge(item["status"]), cls="table-row") for item in contract["signatures"]]
     findings = []
     for review in contract["findings"]:
@@ -500,7 +523,7 @@ def contract_detail_page(actor: Actor, contract: dict, counterparties: list[dict
             ),
             Div(
                 Section(H3("Contract review"), P("Rule-based review is always available. xAI provides a deeper assistive review and never changes approval or lifecycle state.", cls="muted"), Div(Span(f"{usage['remaining']} of {usage['limit']} shared AI queries remain" if not usage["has_byok"] else "Using your encrypted xAI key", cls="callout")), Form(Input(type="hidden", name="csrf", value=csrf), Input(type="hidden", name="use_ai", value="false"), Button("Run local review", cls="button secondary full"), action=f"/contracts/{contract['id']}/review", method="post"), Form(Input(type="hidden", name="csrf", value=csrf), Input(type="hidden", name="use_ai", value="true"), Button("Review with xAI", cls="button full"), action=f"/contracts/{contract['id']}/review", method="post"), *findings, cls="panel form-stack"),
-                Section(H3("Approval decisions"), Div(*approvals, cls="table-card") if approvals else P("No decisions recorded.", cls="muted"), Form(Input(type="hidden", name="csrf", value=csrf), Select(Option("Approve", value="approved"), Option("Request changes", value="changes_requested"), name="decision"), Textarea(name="comment", rows="2", placeholder="Decision rationale"), Button("Record decision", cls="button"), action=f"/contracts/{contract['id']}/approval", method="post", cls="form-stack") if actor.can("contracts.approve") and contract["status"] == "approval" else None, cls="panel"),
+                Section(H3("Approval workflow"), P(f"{approval_run['policy_name']} · {approval_run['status'].replace('_', ' ').title()}" if approval_run else "A policy is selected when the contract enters approval.", cls="muted"), *approval_stages, Div(*approvals, cls="table-card") if approvals else None, Form(Input(type="hidden", name="csrf", value=csrf), Select(Option("Approve current stage", value="approved"), Option("Request changes", value="changes_requested"), name="decision"), Textarea(name="comment", rows="2", placeholder="Decision rationale"), Button("Record human decision", cls="button"), action=f"/contracts/{contract['id']}/approval", method="post", cls="form-stack") if actor.can("contracts.approve") and contract["status"] == "approval" else None, cls="panel"),
                 Section(H3("Electronic signature"), P("Prepare a provider payload for review. No envelope or document is sent automatically.", cls="muted"), Div(*signatures, cls="table-card") if signatures else None, Form(Input(type="hidden", name="csrf", value=csrf), Select(Option("SignWell", value="signwell"), Option("DocuSign", value="docusign"), name="provider"), Input(name="recipient_name", placeholder="Signer name", required=True), Input(type="email", name="recipient_email", placeholder="signer@example.com", required=True), Button("Prepare signature request", cls="button"), action=f"/contracts/{contract['id']}/signatures", method="post", cls="form-stack") if actor.can("contracts.transition") and contract["status"] == "signature" else None, cls="panel"),
                 cls="section-stack",
             ),
@@ -538,6 +561,62 @@ def audit_page(actor: Actor, rows: list[dict]) -> Html:
     items = [Div(Div(H3(item["action"].replace(".", " ").title()), P(f"{item['entity_type']} · {item['entity_id']}", cls="muted")), Div(Strong(item["actor_name"] or "System"), Small(item["created_at"]), cls="table-meta"), cls="table-row") for item in rows]
     content = Div(page_intro("AUDIT TRAIL", "A durable record of contract activity", "Every material mutation and decision is written as an append-only event."), Div(*items, cls="table-card") if items else empty_state("No activity", "Workspace events will appear here."), cls="page-scroll")
     return shell(actor, "audit", "Audit trail", content)
+
+
+def approvals_page(actor: Actor, data: dict, csrf: str, notice: str = "") -> Html:
+    policies = []
+    for policy in data["policies"]:
+        stages = [Div(
+            Div(Strong(f"{stage['position']}. {stage['name']}"), status_badge(f"{stage['required_approvals']}_required"), cls="subhead"),
+            P(f"{', '.join(stage['allowed_roles'])} · requester {'allowed' if stage['allow_requester'] else 'excluded'} · {'distinct from prior stages' if stage['require_distinct_prior'] else 'repeat participation allowed'}", cls="muted"),
+            cls="finding",
+        ) for stage in policy["stages"]]
+        policies.append(Section(
+            Div(Div(H3(policy["name"]), P(policy["contract_type"] or "All contract types", cls="muted")), status_badge("active" if policy["active"] else "inactive"), cls="subhead"),
+            *stages,
+            cls="panel",
+        ))
+    delegations = [Div(
+        Div(Strong(f"{item['delegator_name']} → {item['delegate_name']}"), Small(f"{item['starts_at']} to {item['ends_at']}")),
+        status_badge("active" if item["active"] else "inactive"), cls="table-row",
+    ) for item in data["delegations"]]
+    capable = [item for item in data["members"] if item["role"] in {"owner", "admin", "approver"}]
+    policy_form = Section(
+        H3("Create approval policy"),
+        P("Configure up to three ordered stages. Blank later stages are ignored.", cls="muted"),
+        Form(
+            Input(type="hidden", name="csrf", value=csrf),
+            Label("Policy name", Input(name="name", required=True, placeholder="High-value commercial approval")),
+            Label("Contract type", Input(name="contract_type", placeholder="Blank applies to all contract types")),
+            *[Div(
+                H4(f"Stage {number}"),
+                Input(name=f"stage_{number}_name", placeholder="Stage name", required=number == 1),
+                Label("Eligible roles", Select(*[Option(role.title(), value=role, selected=role in {"owner", "admin", "approver"}) for role in ("owner", "admin", "approver")], name=f"stage_{number}_roles", multiple=True)),
+                Div(Label("Approvals required", Input(type="number", min="1", max="20", value="1", name=f"stage_{number}_quorum")), Label(Input(type="checkbox", name=f"stage_{number}_allow_requester", value="true", checked=True), "Requester may approve", cls="checkbox-label"), Label(Input(type="checkbox", name=f"stage_{number}_distinct", value="true"), "Different from prior stages", cls="checkbox-label"), cls="form-row"),
+                cls="finding",
+            ) for number in range(1, 4)],
+            Button("Create policy", cls="button"), action="/approval-policies", method="post", cls="form-stack",
+        ), cls="panel",
+    ) if actor.can("team.manage") else None
+    delegation_form = Section(
+        H3("Time-bounded delegation"),
+        P("A delegate acts on behalf of an eligible approver, and both identities are preserved in the decision evidence.", cls="muted"),
+        Form(
+            Input(type="hidden", name="csrf", value=csrf),
+            Label("Delegator", Select(*[Option(f"{item['name']} · {item['role']}", value=item["user_id"]) for item in capable], name="delegator_user_id")),
+            Label("Delegate", Select(*[Option(f"{item['name']} · {item['role']}", value=item["user_id"]) for item in capable], name="delegate_user_id")),
+            Div(Label("Starts", Input(type="datetime-local", name="starts_at", required=True)), Label("Ends", Input(type="datetime-local", name="ends_at", required=True)), cls="form-row"),
+            Button("Create delegation", cls="button secondary"), action="/approval-delegations", method="post", cls="form-stack",
+        ), cls="panel",
+    ) if actor.can("team.manage") else None
+    content = Div(
+        page_intro("APPROVAL GOVERNANCE", "Ordered human decisions with evidence", "Use stages, quorums, named assignments, requester exclusion, separation of duties, and temporary delegation without allowing AI to approve."),
+        Div(notice, cls="alert success") if notice else None,
+        Div(Div(*policies, cls="section-stack") if policies else empty_state("No policies", "The standard single-stage policy is created when a contract first enters approval."), policy_form, cls="two-column"),
+        Div(Section(H3("Delegations"), Div(*delegations, cls="table-card") if delegations else P("No delegations recorded.", cls="muted"), cls="panel"), delegation_form, cls="two-column"),
+        cls="page-scroll",
+    )
+    return shell(actor, "approvals", "Approvals", content)
 
 
 def team_page(actor: Actor, data: dict, csrf: str, notice: str = "", error: str = "") -> Html:

@@ -26,6 +26,7 @@ from fastclm.reminders import start_scheduler, stop_scheduler
 from fastclm.security import Actor, csrf_valid, token
 from fastclm.services.audit import AuditService
 from fastclm.services.assistant import AssistantService, find_quote_anchor
+from fastclm.services.approvals import ApprovalService
 from fastclm.services.backups import BackupService
 from fastclm.services.contracts import ContractService
 from fastclm.services.credentials import clear_xai_key, key_status, store_xai_key, usage
@@ -40,6 +41,7 @@ from fastclm.services.skills import SkillService
 from fastclm.storage import get_storage
 from fastclm.web.ui import (
     audit_page,
+    approvals_page,
     assistant_page,
     auth_page,
     clauses_page,
@@ -144,6 +146,7 @@ def _contract_page(request, contract_id: str, notice: str = ""):
         contract,
         service.counterparties(actor),
         DraftingService().workspace(actor, contract_id),
+        ApprovalService().workspace(actor, contract_id),
         request.session["csrf_token"],
         usage(actor.user_id),
         notice,
@@ -452,6 +455,77 @@ def contracts(request, q: str = "", status: str = ""):
     if isinstance(actor, Response):
         return actor
     return contracts_page(actor, ContractService().list(actor, q, status), q, status)
+
+
+@rt("/approval-policies", methods=["GET"])
+def approval_policies(request, notice: str = ""):
+    actor = _required(request, "contracts.view")
+    if isinstance(actor, Response):
+        return actor
+    return approvals_page(actor, ApprovalService().overview(actor), request.session["csrf_token"], notice)
+
+
+@rt("/approval-policies", methods=["POST"])
+async def approval_policy_create(request):
+    actor, data = await _form(request, "team.manage")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        stages = []
+        for number in range(1, 4):
+            name = str(data.get(f"stage_{number}_name", "")).strip()
+            if not name:
+                continue
+            stages.append({
+                "name": name,
+                "allowed_roles": data.getlist(f"stage_{number}_roles"),
+                "required_approvals": str(data.get(f"stage_{number}_quorum", "1")),
+                "allow_requester": bool(data.get(f"stage_{number}_allow_requester")),
+                "require_distinct_prior": bool(data.get(f"stage_{number}_distinct")),
+            })
+        ApprovalService().create_policy(actor, {"name": str(data.get("name", "")), "contract_type": str(data.get("contract_type", "")), "stages": stages})
+        message = "Approval policy created"
+    except Exception as exc:
+        message = str(exc)
+    return RedirectResponse(f"/approval-policies?notice={quote(message)}", status_code=303)
+
+
+@rt("/approval-delegations", methods=["POST"])
+async def approval_delegation_create(request):
+    actor, data = await _form(request, "team.manage")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        ApprovalService().delegate(
+            actor,
+            str(data.get("delegate_user_id", "")),
+            str(data.get("starts_at", "")),
+            str(data.get("ends_at", "")),
+            str(data.get("delegator_user_id", "")),
+        )
+        message = "Approval delegation created"
+    except Exception as exc:
+        message = str(exc)
+    return RedirectResponse(f"/approval-policies?notice={quote(message)}", status_code=303)
+
+
+@rt("/approval-runs/{run_id}/stages/{stage_id}/assign", methods=["POST"])
+async def approval_stage_assign(request, run_id: str, stage_id: str):
+    actor, data = await _form(request, "team.manage")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        ApprovalService().assign(actor, run_id, stage_id, str(data.get("user_id", "")))
+        message = "Approver assigned"
+    except Exception as exc:
+        message = str(exc)
+    contract_id = get_database().scalar(
+        "SELECT contract_id FROM contract_approval_runs WHERE id=? AND organisation_id=?",
+        (run_id, actor.organisation_id),
+    )
+    if not contract_id:
+        return PlainTextResponse(message, status_code=404)
+    return RedirectResponse(f"/contracts/{contract_id}?notice={quote(message)}", status_code=303)
 
 
 @rt("/contracts/new", methods=["GET"])
