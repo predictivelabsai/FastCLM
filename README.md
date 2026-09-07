@@ -39,6 +39,11 @@ Connect and a token-gated integration API are optional.
   durable memory that scopes future retrieval to the remembered agreements.
 - Confirmation-gated action proposals: the assistant can prepare work but
   cannot silently approve, sign, activate, terminate, or change access.
+- Twenty-four streamed, reviewable assistant tools cover contract records,
+  counterparties, obligations, drafting, skills, signature preparation,
+  approval policy setup, reminders, retention, backups, and counsel requests;
+  direct human approval decisions and signature dispatch remain outside the
+  model tool catalogue.
 - Transparent organisation skill library with editable Markdown instructions,
   five starter workflows, immutable version history, and a conversational
   Skill Creator that drafts a reviewable skill proposal. Skills can be tested
@@ -60,6 +65,8 @@ Connect and a token-gated integration API are optional.
   attestation, immutable decision evidence, and checksum-bound approval status
   that becomes stale if the reviewed wording changes. The assistant can prepare
   a request for confirmation but cannot record or invent counsel approval.
+  Each request exports a checksum-bearing Markdown review pack containing the
+  exact preferred wording, fallback, guidance, scope, and return instructions.
 - Scanned-PDF OCR with page provenance, structural upload scanning with an
   optional ClamAV adapter, and local or S3-compatible encrypted object storage.
 - Opt-in attachment retention for completed contract lifecycles and

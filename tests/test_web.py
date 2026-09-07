@@ -17,7 +17,7 @@ def test_public_landing_health_and_developer_surface(fresh_db, caplog):
         health = client.get("/healthz?never_log=this-secret-query")
         assert health.status_code == 200
         assert health.json()["product"] == "FastCLM"
-        assert health.json()["database"]["dialect"] == "sqlite"
+        assert health.json()["database"]["dialect"] == fresh_db.dialect
         assert health.json()["database"]["latency_ms"] >= 0
         assert health.headers["x-request-id"]
         metrics = client.get("/metrics")
@@ -25,6 +25,7 @@ def test_public_landing_health_and_developer_surface(fresh_db, caplog):
         assert "fastclm_http_requests_total" in metrics.text
         assert 'method="GET",status="200"' in metrics.text
         assert "this-secret-query" not in caplog.text
+        assert '"route":"/healthz"' in caplog.text
         developers = client.get("/developers")
         assert "organisation-scoped" in developers.text
         assert 'href="/swagger.json"' in developers.text

@@ -88,4 +88,7 @@ def refund(user_id: str, reserved: bool) -> None:
     if not reserved:
         return
     with get_database().transaction() as tx:
-        tx.execute("UPDATE user_ai_allowances SET platform_queries_used=MAX(platform_queries_used-1,0),updated_at=? WHERE user_id=?", (now(), user_id))
+        tx.execute(
+            "UPDATE user_ai_allowances SET platform_queries_used=CASE WHEN platform_queries_used>0 THEN platform_queries_used-1 ELSE 0 END,updated_at=? WHERE user_id=?",
+            (now(), user_id),
+        )

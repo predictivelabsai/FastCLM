@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from fastclm.services.assistant import AssistantService, find_quote_anchor, verify_word_citations
+from fastclm.services.assistant import TOOL_DEFINITIONS, WRITE_TOOLS, AssistantService, find_quote_anchor, verify_word_citations
 from fastclm.services.contracts import ContractService
 from fastclm.services.identity import IdentityService, new_id, now
 from fastclm.services.legal_content import LegalContentService
@@ -81,6 +81,42 @@ def test_confirmed_assistant_action_uses_service_permission_boundary(workspace, 
     AssistantService().decide(actor, action_id, True)
     assert fresh_db.one("SELECT status FROM assistant_actions WHERE id=?", (action_id,))["status"] == "confirmed"
     assert fresh_db.one("SELECT title FROM obligations WHERE contract_id=?", (contract["id"],))["title"] == "Annual review"
+
+
+def test_assistant_tool_catalog_covers_contract_and_governance_workflows(workspace, fresh_db):
+    actor, _, _ = workspace
+    names = {item["function"]["name"] for item in TOOL_DEFINITIONS}
+    assert names == WRITE_TOOLS
+    assert {
+        "add_counterparty", "prepare_signature_request", "create_workspace_backup",
+        "set_reminder_preferences", "create_reminder_escalation", "update_notification_template",
+        "create_approval_policy", "create_approval_delegation", "set_retention_policy",
+    } <= names
+    assert not {"approve_contract", "record_approval_decision", "dispatch_signature_request", "change_member_role"} & names
+    thread = AssistantService().ensure_workspace(actor)
+    message_id, created = new_id(), now()
+    actions = [
+        (new_id(), "add_counterparty", {"name": "Assistant Counterparty Ltd", "jurisdiction": "England and Wales"}),
+        (new_id(), "set_reminder_preferences", {"enabled": True, "due_soon_days": 21, "overdue_repeat_days": 3}),
+        (new_id(), "set_retention_policy", {"enabled": True, "days": 730}),
+        (new_id(), "create_approval_policy", {"name": "Assistant policy", "stages": [{"name": "Legal", "allowed_roles": ["owner"], "required_approvals": 1, "allow_requester": False, "require_distinct_prior": False}]}),
+    ]
+    with fresh_db.transaction() as tx:
+        tx.execute(
+            "INSERT INTO assistant_messages(id,organisation_id,thread_id,user_id,role,content,created_at) VALUES (?,?,?,?,?,?,?)",
+            (message_id, actor.organisation_id, thread["id"], actor.user_id, "assistant", "Governance proposals", created),
+        )
+        for action_id, tool_name, arguments in actions:
+            tx.execute(
+                "INSERT INTO assistant_actions(id,organisation_id,thread_id,message_id,tool_name,summary,arguments_json,created_at) VALUES (?,?,?,?,?,?,?,?)",
+                (action_id, actor.organisation_id, thread["id"], message_id, tool_name, tool_name, json.dumps(arguments), created),
+            )
+    for action_id, _tool_name, _arguments in actions:
+        AssistantService().decide(actor, action_id, True)
+    assert fresh_db.scalar("SELECT COUNT(*) FROM counterparties WHERE organisation_id=? AND name='Assistant Counterparty Ltd'", (actor.organisation_id,)) == 1
+    assert fresh_db.one("SELECT due_soon_days,overdue_repeat_days FROM reminder_preferences WHERE organisation_id=? AND user_id=?", (actor.organisation_id, actor.user_id)) == {"due_soon_days": 21, "overdue_repeat_days": 3}
+    assert fresh_db.one("SELECT retention_enabled,retention_days FROM organisations WHERE id=?", (actor.organisation_id,)) == {"retention_enabled": 1, "retention_days": 730}
+    assert fresh_db.scalar("SELECT COUNT(*) FROM approval_policies WHERE organisation_id=? AND name='Assistant policy'", (actor.organisation_id,)) == 1
 
 
 def test_word_level_citations_require_consecutive_source_words():

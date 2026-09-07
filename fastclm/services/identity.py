@@ -111,7 +111,8 @@ class IdentityService:
 
     def memberships(self, user_id: str) -> list[dict]:
         return get_database().rows(
-            "SELECT m.*,o.name organisation_name FROM memberships m JOIN organisations o ON o.id=m.organisation_id WHERE m.user_id=? ORDER BY m.created_at",
+            "SELECT m.*,o.name organisation_name FROM memberships m JOIN organisations o ON o.id=m.organisation_id "
+            "WHERE m.user_id=? ORDER BY CASE WHEN m.role='owner' THEN 0 ELSE 1 END,m.created_at,m.organisation_id",
             (user_id,),
         )
 

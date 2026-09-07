@@ -11,15 +11,20 @@ from fastclm.config import settings
 from fastclm.database import get_database
 from fastclm.security import Actor
 from fastclm.services.audit import AuditService
+from fastclm.services.approvals import ApprovalService
+from fastclm.services.backups import BackupService
 from fastclm.services.contracts import ContractService
 from fastclm.services.credentials import authorize, refund
 from fastclm.services.drafting import DraftingService
 from fastclm.services.identity import new_id, now
 from fastclm.services.legal_content import LegalContentService
+from fastclm.services.notifications import NotificationService
+from fastclm.services.retention import RetentionService
+from fastclm.services.signatures import SignatureService
 from fastclm.services.skills import SkillService
 
 
-WRITE_TOOLS = {"create_contract", "add_obligation", "transition_contract", "create_skill", "set_matter_context", "record_skill_test", "revise_skill", "propose_redline", "add_contract_comment", "create_assignment", "insert_library_clause", "assemble_template", "apply_playbook", "request_legal_review"}
+WRITE_TOOLS = {"create_contract", "add_obligation", "transition_contract", "create_skill", "set_matter_context", "record_skill_test", "revise_skill", "propose_redline", "add_contract_comment", "create_assignment", "insert_library_clause", "assemble_template", "apply_playbook", "request_legal_review", "add_counterparty", "complete_obligation", "prepare_signature_request", "create_workspace_backup", "set_reminder_preferences", "create_reminder_escalation", "update_notification_template", "create_approval_policy", "create_approval_delegation", "set_retention_policy"}
 WORD_RE = re.compile(r"[\w]+(?:[’'-][\w]+)*", re.UNICODE)
 CITATION_RE = re.compile(r"\[\[cite:(\d+)\|(.+?)\]\]", re.DOTALL | re.IGNORECASE)
 SKILL_REQUEST_RE = re.compile(r"\b(create|build|make|draft|design|improve|edit|want|need)\b.{0,40}\bskill\b|\bskill\b.{0,40}\b(create|builder|creator)\b", re.IGNORECASE)
@@ -39,6 +44,16 @@ TOOL_DEFINITIONS = [
     {"type": "function", "function": {"name": "assemble_template", "description": "Propose assembling a new draft contract from a workspace template.", "parameters": {"type": "object", "properties": {"template_id": {"type": "string"}, "title": {"type": "string"}, "reference": {"type": "string"}}, "required": ["template_id", "title"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "apply_playbook", "description": "Propose applying all preferred or fallback positions from a negotiation playbook to a draft/review contract.", "parameters": {"type": "object", "properties": {"contract_id": {"type": "string"}, "playbook_id": {"type": "string"}, "use_fallback": {"type": "boolean"}}, "required": ["contract_id", "playbook_id", "use_fallback"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "request_legal_review", "description": "Propose a scoped external counsel review request for exact library clauses and a qualified jurisdiction. This does not claim the wording is approved.", "parameters": {"type": "object", "properties": {"scope": {"type": "string"}, "jurisdiction": {"type": "string"}, "clause_ids": {"type": "array", "items": {"type": "string"}, "minItems": 1}, "reviewer_name": {"type": "string"}, "reviewer_email": {"type": "string"}}, "required": ["scope", "jurisdiction", "clause_ids"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "add_counterparty", "description": "Propose a workspace counterparty record for human confirmation.", "parameters": {"type": "object", "properties": {"name": {"type": "string"}, "registration_number": {"type": "string"}, "jurisdiction": {"type": "string"}, "contact_name": {"type": "string"}, "contact_email": {"type": "string"}}, "required": ["name"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "complete_obligation", "description": "Propose marking a specific tracked obligation complete. Human confirmation is required.", "parameters": {"type": "object", "properties": {"obligation_id": {"type": "string"}}, "required": ["obligation_id"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "prepare_signature_request", "description": "Propose a local DocuSign or SignWell signature draft against the frozen latest version. This never dispatches it.", "parameters": {"type": "object", "properties": {"contract_id": {"type": "string"}, "provider": {"type": "string", "enum": ["docusign", "signwell"]}, "recipient_name": {"type": "string"}, "recipient_email": {"type": "string"}}, "required": ["contract_id", "provider", "recipient_name", "recipient_email"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "create_workspace_backup", "description": "Propose creating an encrypted tenant backup for human confirmation.", "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "set_reminder_preferences", "description": "Propose the current user's reminder opt-in, due-soon window, and overdue cadence.", "parameters": {"type": "object", "properties": {"enabled": {"type": "boolean"}, "due_soon_days": {"type": "integer", "minimum": 0, "maximum": 90}, "overdue_repeat_days": {"type": "integer", "minimum": 1, "maximum": 30}}, "required": ["enabled", "due_soon_days", "overdue_repeat_days"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "create_reminder_escalation", "description": "Propose a role- or person-based overdue escalation rule.", "parameters": {"type": "object", "properties": {"name": {"type": "string"}, "overdue_days": {"type": "integer", "minimum": 0, "maximum": 365}, "recipient_role": {"type": "string"}, "recipient_user_id": {"type": "string"}}, "required": ["name", "overdue_days"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "update_notification_template", "description": "Propose replacement subject/body text or a Postmark alias for one tenant reminder template.", "parameters": {"type": "object", "properties": {"template_key": {"type": "string", "enum": ["due_soon", "overdue", "escalation"]}, "subject": {"type": "string"}, "body": {"type": "string"}, "postmark_alias": {"type": "string"}}, "required": ["template_key", "subject", "body"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "create_approval_policy", "description": "Propose an ordered approval policy with role eligibility and quorum controls.", "parameters": {"type": "object", "properties": {"name": {"type": "string"}, "contract_type": {"type": "string"}, "stages": {"type": "array", "minItems": 1, "maxItems": 10, "items": {"type": "object", "properties": {"name": {"type": "string"}, "allowed_roles": {"type": "array", "items": {"type": "string", "enum": ["owner", "admin", "approver"]}, "minItems": 1}, "required_approvals": {"type": "integer", "minimum": 1}, "allow_requester": {"type": "boolean"}, "require_distinct_prior": {"type": "boolean"}}, "required": ["name", "allowed_roles", "required_approvals"], "additionalProperties": False}}}, "required": ["name", "stages"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "create_approval_delegation", "description": "Propose a bounded approval delegation between workspace users.", "parameters": {"type": "object", "properties": {"delegator_user_id": {"type": "string"}, "delegate_user_id": {"type": "string"}, "starts_at": {"type": "string"}, "ends_at": {"type": "string"}}, "required": ["delegate_user_id", "starts_at", "ends_at"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "set_retention_policy", "description": "Propose enabling or disabling source-attachment retention and its age threshold. This does not run deletion.", "parameters": {"type": "object", "properties": {"enabled": {"type": "boolean"}, "days": {"type": "integer", "minimum": 30, "maximum": 3650}}, "required": ["enabled", "days"], "additionalProperties": False}}},
 ]
 
 
@@ -254,6 +269,9 @@ class AssistantService:
             "templates": [{"id": item["id"], "name": item["name"]} for item in drafting.templates(actor)],
             "playbooks": [{"id": item["id"], "name": item["name"]} for item in drafting.playbooks(actor)],
             "members": get_database().rows("SELECT u.id,u.name FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.organisation_id=?", (actor.organisation_id,)),
+            "counterparties": [{"id": item["id"], "name": item["name"]} for item in ContractService().counterparties(actor)],
+            "open_obligations": [{"id": item["id"], "contract_id": item["contract_id"], "title": item["title"], "due_date": item["due_date"]} for item in ContractService().obligations(actor)],
+            "approval_policies": [{"id": item["id"], "name": item["name"], "contract_type": item["contract_type"]} for item in ApprovalService().policies(actor)],
         }
 
     def stream(self, actor: Actor, thread_id: str, question: str, skill_id: str = "", contract_id: str = "") -> Iterator[dict]:
@@ -341,6 +359,26 @@ class AssistantService:
             return "Apply negotiation playbook and save a version"
         if name == "request_legal_review":
             return f"Request counsel review for {len(arguments.get('clause_ids', []))} library clause(s)"
+        if name == "add_counterparty":
+            return f"Add counterparty “{str(arguments.get('name', 'Untitled counterparty'))[:120]}”"
+        if name == "complete_obligation":
+            return "Mark the selected obligation complete"
+        if name == "prepare_signature_request":
+            return f"Prepare {str(arguments.get('provider', 'signature')).title()} request for {str(arguments.get('recipient_name', 'signer'))[:100]}"
+        if name == "create_workspace_backup":
+            return "Create an encrypted workspace backup"
+        if name == "set_reminder_preferences":
+            return "Update personal reminder preferences"
+        if name == "create_reminder_escalation":
+            return f"Create escalation “{str(arguments.get('name', 'overdue escalation'))[:120]}”"
+        if name == "update_notification_template":
+            return f"Update {str(arguments.get('template_key', 'reminder')).replace('_', ' ')} notification template"
+        if name == "create_approval_policy":
+            return f"Create approval policy “{str(arguments.get('name', 'Untitled policy'))[:120]}”"
+        if name == "create_approval_delegation":
+            return "Create a time-bounded approval delegation"
+        if name == "set_retention_policy":
+            return "Update source-attachment retention policy"
         return f"Move contract to {str(arguments.get('target', 'the proposed state'))[:80]}"
 
     def _prompt_messages(self, question: str, sources: list[dict], skill: dict | None, history: list[dict]) -> list[dict]:
@@ -357,6 +395,7 @@ When creating a skill, converse first: establish purpose, triggers, inputs, work
 When the user asks to test a selected skill, apply it to the selected example contract, show cited output, compare it with an explicit expected outcome, and use record_skill_test. If refinement is requested, discuss the change and use revise_skill with the complete replacement instructions; never silently overwrite a skill.
 When the user asks you to remember a matter involving several agreements, identify only available contract IDs and use set_matter_context with a concise factual summary. Saved matter memory and contract links require confirmation.
 When library wording needs jurisdiction-specific legal validation, use request_legal_review with the exact clause IDs, jurisdiction, and a bounded scope. Never describe unreviewed wording as approved and never fabricate counsel identity, qualification, or evidence.
+Administrative tools also create proposals only. Explain external effects and retention implications before proposing them. prepare_signature_request creates a local frozen draft only; it never dispatches a document. Never use an approval decision or signature dispatch tool because those decisions must originate directly from a human.
 
 ACTIVE SKILL:
 {skill_text}"""
@@ -449,6 +488,40 @@ ACTIVE SKILL:
                 DraftingService().apply_playbook(actor, str(args.get("contract_id", "")), str(args.get("playbook_id", "")), bool(args.get("use_fallback")))
             elif row["tool_name"] == "request_legal_review":
                 LegalContentService().request_review(actor, args)
+            elif row["tool_name"] == "add_counterparty":
+                ContractService().add_counterparty(actor, args)
+            elif row["tool_name"] == "complete_obligation":
+                ContractService().complete_obligation(actor, str(args.get("obligation_id", "")))
+            elif row["tool_name"] == "prepare_signature_request":
+                SignatureService().prepare(
+                    actor, str(args.get("contract_id", "")), str(args.get("provider", "")),
+                    str(args.get("recipient_name", "")), str(args.get("recipient_email", "")),
+                )
+            elif row["tool_name"] == "create_workspace_backup":
+                BackupService().create(actor)
+            elif row["tool_name"] == "set_reminder_preferences":
+                NotificationService().save_preferences(
+                    actor, bool(args.get("enabled")), int(args.get("due_soon_days", 14)), int(args.get("overdue_repeat_days", 1)),
+                )
+            elif row["tool_name"] == "create_reminder_escalation":
+                NotificationService().create_escalation(
+                    actor, str(args.get("name", "")), int(args.get("overdue_days", 0)),
+                    str(args.get("recipient_role", "")), str(args.get("recipient_user_id", "")),
+                )
+            elif row["tool_name"] == "update_notification_template":
+                NotificationService().update_template(
+                    actor, str(args.get("template_key", "")), str(args.get("subject", "")),
+                    str(args.get("body", "")), str(args.get("postmark_alias", "")),
+                )
+            elif row["tool_name"] == "create_approval_policy":
+                ApprovalService().create_policy(actor, args)
+            elif row["tool_name"] == "create_approval_delegation":
+                ApprovalService().delegate(
+                    actor, str(args.get("delegate_user_id", "")), str(args.get("starts_at", "")),
+                    str(args.get("ends_at", "")), str(args.get("delegator_user_id", "")),
+                )
+            elif row["tool_name"] == "set_retention_policy":
+                RetentionService().set_policy(actor, bool(args.get("enabled")), int(args.get("days", 365)))
             else:
                 raise ValueError("Unsupported proposal")
         except Exception as exc:

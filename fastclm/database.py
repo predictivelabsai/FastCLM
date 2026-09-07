@@ -16,7 +16,7 @@ POSTGRES_MIGRATIONS = settings.root / "migrations" / "postgres"
 
 
 def _postgres_query(query: str) -> str:
-    translated = query.replace("?", "%s")
+    translated = query.replace("%", "%%").replace("?", "%s")
     if "INSERT OR IGNORE INTO" in translated.upper():
         translated = translated.replace("INSERT OR IGNORE INTO", "INSERT INTO").rstrip().rstrip(";") + " ON CONFLICT DO NOTHING"
     return translated
@@ -47,7 +47,7 @@ class Transaction:
 class Database:
     def __init__(self, path: str | Path = "", database_url: str = ""):
         self.database_url = database_url.strip()
-        self.dialect = "postgresql" if self.database_url.startswith(("postgres://", "postgresql://")) else "sqlite"
+        self.dialect = "postgresql" if self.database_url else "sqlite"
         self.path = Path(path or settings.sqlite_path)
 
     @classmethod

@@ -1035,6 +1035,22 @@ async def legal_content_request(request):
         return RedirectResponse(f"/legal-content?error={quote(str(exc))}", status_code=303)
 
 
+@rt("/legal-content/requests/{request_id}/pack", methods=["GET"])
+def legal_content_review_pack(request, request_id: str):
+    actor = _required(request, "contracts.view")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        filename, content = LegalContentService().review_pack(actor, request_id)
+        return PlainTextResponse(
+            content,
+            media_type="text/markdown",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except LookupError:
+        return PlainTextResponse("Not found", status_code=404)
+
+
 @rt("/legal-content/reviews", methods=["POST"])
 async def legal_content_review(request):
     actor, data = await _form(request, "clauses.manage")

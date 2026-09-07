@@ -582,7 +582,7 @@ def legal_content_page(actor: Actor, data: dict, csrf: str, error: str = "", not
     ) for item in data["clauses"]]
     request_rows = [Div(
         Div(Strong(item["scope"]), Small(f"{item['jurisdiction']} · {item['reviewer_name'] or item['reviewer_email'] or 'Reviewer not assigned'}"), cls="identity-copy"),
-        Div(status_badge(item["status"]), Small(item["created_at"]), cls="table-meta"),
+        Div(status_badge(item["status"]), Small(item["created_at"]), A("Review pack", href=f"/legal-content/requests/{item['id']}/pack", cls="quiet-link"), cls="table-meta"),
         cls="table-row",
     ) for item in data["requests"]]
     review_rows = [Div(

@@ -87,6 +87,64 @@ class LegalContentService:
             }, tx)
         return get_database().one("SELECT * FROM legal_review_requests WHERE id=? AND organisation_id=?", (request_id, actor.organisation_id))
 
+    def review_pack(self, actor: Actor, request_id: str) -> tuple[str, str]:
+        actor.require("contracts.view")
+        request = get_database().one(
+            "SELECT * FROM legal_review_requests WHERE id=? AND organisation_id=?",
+            (request_id, actor.organisation_id),
+        )
+        if not request:
+            raise LookupError("Counsel review request not found")
+        clause_ids = json.loads(request["clause_ids_json"])
+        placeholders = ",".join("?" for _ in clause_ids)
+        clauses = get_database().rows(
+            f"SELECT * FROM clauses WHERE organisation_id=? AND id IN ({placeholders})",
+            (actor.organisation_id, *clause_ids),
+        )
+        by_id = {item["id"]: item for item in clauses}
+        if len(by_id) != len(clause_ids):
+            raise ValueError("The review request contains an unavailable clause")
+        lines = [
+            "# FastCLM external counsel review pack",
+            "",
+            f"- Request ID: `{request['id']}`",
+            f"- Workspace: {actor.organisation_name}",
+            f"- Qualified jurisdiction requested: {request['jurisdiction']}",
+            f"- Scope: {request['scope']}",
+            f"- Requested reviewer: {request['reviewer_name'] or 'Not assigned'}",
+            f"- Reviewer email: {request['reviewer_email'] or 'Not assigned'}",
+            "",
+            "## Instructions for counsel",
+            "",
+            "Review only the exact wording and scope below. For each clause, return a decision of approved, changes requested, or not approved; the jurisdiction reviewed; your professional qualification and registration; scope limits or assumptions; and a controlled matter/file reference for the opinion evidence.",
+            "",
+            "FastCLM will bind the returned decision to the wording checksum. Any wording change makes that status stale.",
+        ]
+        for position, clause_id in enumerate(clause_ids, 1):
+            clause = by_id[clause_id]
+            lines.extend([
+                "",
+                f"## {position}. {clause['title']}",
+                "",
+                f"- Clause ID: `{clause['id']}`",
+                f"- Library jurisdiction label: {clause['jurisdiction']}",
+                f"- Category: {clause['category']}",
+                f"- Wording checksum: `{wording_checksum(clause)}`",
+                "",
+                "### Preferred wording",
+                "",
+                clause["body"],
+                "",
+                "### Negotiated fallback",
+                "",
+                clause["fallback_body"] or "(No fallback supplied.)",
+                "",
+                "### Internal review guidance",
+                "",
+                clause["risk_guidance"] or "(No guidance supplied.)",
+            ])
+        return f"fastclm-counsel-review-{request['id']}.md", "\n".join(lines) + "\n"
+
     def record_review(self, actor: Actor, data: dict) -> dict:
         actor.require("clauses.manage")
         clause_id = str(data.get("clause_id", "")).strip()

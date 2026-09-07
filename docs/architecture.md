@@ -111,6 +111,11 @@ Write-like model output is stored as a pending `assistant_action`. Nothing is
 executed until a signed-in user confirms it. Confirmation calls the same
 `ContractService` methods used by the conventional screens, so role checks,
 lifecycle gates, immutable versions, and audit events are not bypassed.
+The tool catalogue spans operational and administrative proposal workflows,
+including counterparties, obligations, signature-draft preparation, approval
+policies, reminders, retention, backups, and external counsel requests. It
+intentionally omits approval decisions, access changes, and signature dispatch;
+those actions must originate from a direct human control.
 
 Skills are organisation-scoped Markdown instructions. Owner, admin, and legal
 roles can edit them. Every save inserts an immutable `skill_versions` row while
@@ -151,6 +156,8 @@ inherit an older approval. FastCLM records this evidence; it does not verify a
 professional register or turn generic content into legal advice by itself.
 The assistant sees review status and may propose a scoped review request, but
 only the direct evidence workflow can record a returned counsel decision.
+Each request can be exported as a portable Markdown pack containing its scope,
+jurisdiction, exact clause text, fallbacks, guidance, and wording checksums.
 
 ## External actions
 

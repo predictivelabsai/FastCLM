@@ -51,14 +51,20 @@ Updated: 2026-09-08
   local/Postmark-alias templates; and auditable role/person escalation paths
   with retry-safe, one-time threshold delivery.
 - SQLite/PostgreSQL repository parity through a shared migration ledger and
-  dialect-native full-text indexes, verified against an isolated PostgreSQL 16
-  server; weighted organisation-scoped prefix search; database-aware health,
+  dialect-native full-text indexes, with the complete test suite verified on
+  isolated per-test PostgreSQL 16 databases as well as SQLite;
+  weighted organisation-scoped prefix search; database-aware health,
   request IDs, privacy-safe structured request logs, and Prometheus counters.
 - Counsel-review governance with scoped clause/jurisdiction requests,
   qualification attestation, immutable reviewer and evidence records, and
   wording-checksum status that prevents an edited clause inheriting an older
   decision; the assistant can prepare a request for confirmation but cannot
-  create counsel evidence or mark wording approved.
+  create counsel evidence or mark wording approved. Portable review packs bind
+  the requested scope to the exact clause text and checksums.
+- Twenty-four confirmation-gated assistant tools span contract operations,
+  drafting, signature preparation, approval configuration, notifications,
+  retention, backups, and counsel requests, while human-only decisions and
+  external dispatch remain deliberately outside the model catalogue.
 
 ## Next production increments
 

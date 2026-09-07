@@ -9,6 +9,8 @@ import time
 from collections import Counter
 from uuid import uuid4
 
+from starlette.routing import Match
+
 
 LOGGER = logging.getLogger("fastclm.requests")
 LOGGER.setLevel(logging.INFO)
@@ -67,6 +69,19 @@ class ObservabilityMiddleware:
 
     def __init__(self, app) -> None:
         self.app = app
+        route_app = app
+        for _ in range(8):
+            if hasattr(route_app, "routes"):
+                break
+            route_app = getattr(route_app, "app", route_app)
+        self.route_app = route_app
+
+    def _route_template(self, scope) -> str:
+        for route in getattr(self.route_app, "routes", ()):
+            match, _child_scope = route.matches(scope)
+            if match is Match.FULL:
+                return str(getattr(route, "path", "mounted"))
+        return "unmatched"
 
     async def __call__(self, scope, receive, send) -> None:
         if scope["type"] != "http":
@@ -76,6 +91,7 @@ class ObservabilityMiddleware:
         supplied_request_id = raw_headers.get(b"x-request-id", b"").decode("ascii", "ignore")
         request_id = supplied_request_id if _REQUEST_ID.fullmatch(supplied_request_id) else uuid4().hex
         method = scope.get("method", "GET").upper()
+        route_template = self._route_template(scope)
         started = time.monotonic()
         status_code = 500
         http_metrics.start()
@@ -95,12 +111,11 @@ class ObservabilityMiddleware:
         finally:
             duration = time.monotonic() - started
             http_metrics.finish(method, status_code, duration)
-            route = scope.get("route")
             LOGGER.info(json.dumps({
                 "event": "http.request",
                 "request_id": request_id,
                 "method": method,
-                "route": getattr(route, "path", "unmatched"),
+                "route": route_template,
                 "status": status_code,
                 "duration_ms": round(duration * 1000, 3),
             }, separators=(",", ":"), sort_keys=True))

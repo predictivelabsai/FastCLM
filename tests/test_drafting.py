@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastclm.services.contracts import ContractService
 from fastclm.services.drafting import DraftingService
-from fastclm.services.identity import IdentityService
+from fastclm.services.identity import IdentityService, now
 
 
 def test_clause_insertion_and_redline_decision_create_immutable_versions(workspace):
@@ -25,7 +25,7 @@ def test_comments_mentions_and_assignments_are_tenant_scoped(workspace, fresh_db
     actor, _, organisation = workspace
     member, _ = IdentityService().create_workspace("collaborator@example.test", "Secure-collab-pass1!", "Collaborator", "Other org")
     with fresh_db.transaction() as tx:
-        tx.execute("INSERT INTO memberships(organisation_id,user_id,role,created_at) VALUES (?,?,?,datetime('now'))", (organisation["id"], member["id"], "member"))
+        tx.execute("INSERT INTO memberships(organisation_id,user_id,role,created_at) VALUES (?,?,?,?)", (organisation["id"], member["id"], "member", now()))
     contract = ContractService().create(actor, {"title": "Review agreement"})
     drafting = DraftingService()
     comment = drafting.add_comment(actor, contract["id"], "Please check the liability cap.", mention_user_ids=[member["id"]])

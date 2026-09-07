@@ -19,6 +19,11 @@ def test_qualified_counsel_review_requires_attestation_and_preserves_evidence(wo
         "reviewer_name": "Alex Counsel",
         "reviewer_email": "alex@law.example",
     })
+    filename, review_pack = service.review_pack(actor, request["id"])
+    assert filename.endswith(".md")
+    assert clause["body"] in review_pack
+    assert "Wording checksum" in review_pack
+    assert "approved, changes requested, or not approved" in review_pack
     payload = {
         "clause_id": clause["id"], "request_id": request["id"], "decision": "approved",
         "reviewed_jurisdiction": "England and Wales", "reviewer_name": "Alex Counsel",
@@ -52,5 +57,8 @@ def test_legal_review_is_tenant_scoped_and_requires_clause_manager(workspace):
         "legal-other@example.test", "Another-secure-pass1!", "Other", "Other Legal Studio"
     )
     other_actor = IdentityService().actor(other_user["id"], other_org["id"])
+    request = service.request_review(actor, {"scope": "Review", "jurisdiction": "England", "clause_ids": [clause["id"]]})
+    with pytest.raises(LookupError):
+        service.review_pack(other_actor, request["id"])
     with pytest.raises(LookupError):
         service.request_review(other_actor, {"scope": "Review", "jurisdiction": "England", "clause_ids": [clause["id"]]})
