@@ -12,6 +12,7 @@ load_dotenv()
 
 from fasthtml.common import *
 from starlette.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, StreamingResponse
+from starlette.routing import Route
 from starlette.staticfiles import StaticFiles
 
 from fastclm import __version__
@@ -66,6 +67,15 @@ app, rt = fast_app(
 )
 app.mount("/static", StaticFiles(directory=settings.root / "static"), name="static")
 app.mount("/api", api)
+
+
+async def _favicon(_request):
+    return FileResponse(settings.root / "static" / "favicon.svg", media_type="image/svg+xml")
+
+
+# FastHTML registers its extension-based static fallback before application
+# routes, so the conventional browser favicon path must precede that fallback.
+app.routes.insert(2, Route("/favicon.ico", _favicon, methods=["GET", "HEAD"]))
 
 
 @app.on_event("startup")
@@ -999,6 +1009,10 @@ def healthz():
 
 
 register_seo_routes(app)
+for route_index, route in enumerate(app.routes):
+    if getattr(route, "path", "") == "/favicon.ico":
+        app.routes.insert(0, app.routes.pop(route_index))
+        break
 
 
 serve(host="0.0.0.0", port=settings.port, reload=False)

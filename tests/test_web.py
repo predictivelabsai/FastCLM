@@ -10,6 +10,7 @@ def test_public_landing_health_and_developer_surface(fresh_db):
         assert "Ask your contracts" in landing.text
         assert 'src="/static/product-demo.gif"' in landing.text
         assert "Sign In" in landing.text
+        assert client.get("/favicon.ico").status_code == 200
         assert 'href="/developers"' in landing.text
         assert 'href="/api/docs"' in landing.text
         assert '"@type":"SoftwareApplication"' in landing.text
