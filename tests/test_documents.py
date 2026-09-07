@@ -87,12 +87,27 @@ def test_inline_pdf_repeats_session_tenant_and_integrity_checks(fresh_db, tmp_pa
         assert response.status_code == 200
         assert response.headers["content-type"] == "application/pdf"
         assert response.headers["content-disposition"].startswith("inline;")
+        provenance = client.post("/pdf-provenance", json={
+            "source": f"/versions/{version['id']}/inline",
+            "evidence": "agreement has searchable text",
+        })
+        assert provenance.status_code == 200
+        assert provenance.json() == {
+            "ok": True, "verified": True, "start_word": 1,
+            "end_word": 4, "word_count": 4,
+        }
+        assert client.post("/pdf-provenance", json={
+            "source": f"/versions/{version['id']}/inline", "evidence": "invented clause",
+        }).json()["verified"] is False
 
         other_user, other_org = IdentityService().create_workspace("other-inline@example.test", "Secure-password2!", "Other", "Other Studio")
         other_actor = IdentityService().actor(other_user["id"], other_org["id"])
         other_contract = ContractService().create(other_actor, {"title": "Other PDF"})
         other_version = DocumentService().ingest(other_actor, other_contract["id"], "other.pdf", _pdf_with_text())
         assert client.get(f"/versions/{other_version['id']}/inline").status_code == 404
+        assert client.post("/pdf-provenance", json={
+            "source": f"/versions/{other_version['id']}/inline", "evidence": "searchable text",
+        }).status_code == 404
 
         (upload_dir / version["storage_path"]).write_bytes(b"tampered")
         assert client.get(f"/versions/{version['id']}/inline").status_code == 409

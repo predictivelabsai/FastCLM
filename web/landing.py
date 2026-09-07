@@ -18,14 +18,14 @@ def _head() -> Head:
         Link(rel="preconnect", href="https://fonts.googleapis.com"),
         Link(rel="preconnect", href="https://fonts.gstatic.com", crossorigin=""),
         Link(rel="stylesheet", href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Newsreader:opsz,wght@6..72,600&display=swap"),
-        Link(rel="stylesheet", href="/static/app.css?v=3"),
+        Link(rel="stylesheet", href="/static/app.css?v=4"),
     )
 
 
 def landing_page() -> Html:
     features = (
-        ("Ask the workspace", "Question one agreement or search the whole portfolio. Answers stay grounded in visible, organisation-scoped sources."),
-        ("Skills you can inspect", "Read and edit the Markdown capabilities that guide review, Q&A, snapshots, and obligation extraction. Every save keeps a version."),
+        ("Watch the work", "Stream answers and tool activity live. Durable receipts show what ran, while exact quotes are verified word by word against the source version."),
+        ("Build skills by talking", "Describe a workflow in conversation. The Skill Creator asks for what is missing, drafts readable Markdown, and waits for your approval to publish."),
         ("Human-controlled action", "Let the assistant prepare lifecycle work while approvals, signatures, activation, termination, and access remain explicit human decisions."),
     )
     return Html(

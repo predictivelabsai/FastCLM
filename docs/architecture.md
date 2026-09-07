@@ -9,7 +9,8 @@ integration surface.
 FastHTML AI cockpit ─┐
                      ├─ services ─ transaction boundary ─ SQLite
 FastAPI /api ─────────┘       │
-                              ├─ conversations + proposed actions
+                              ├─ conversations + durable tool receipts
+                              ├─ verified citations + proposed actions
 Word / PDF ─ extraction ──────┼─ immutable contract versions
                               ├─ versioned Markdown skills
                               ├─ deterministic / xAI review
@@ -50,11 +51,20 @@ OCR is deferred.
 
 ## Assistant, sources, and skills
 
-`/app` is the primary workspace. It persists organisation-scoped conversations
-and retrieves only the newest immutable version of contracts in the active
-workspace. Contract text is fenced as untrusted evidence in the xAI prompt;
-answers carry source-version cards that link back to the record or open the
-authenticated PDF.js side pane.
+`/app` is the primary workspace. The browser reads newline-delimited JSON from
+`/assistant/stream`, rendering xAI token deltas and tool lifecycle events as
+they arrive. Completed tool receipts, the final answer, citations, and any
+proposals are committed together so a reload shows the durable result.
+
+Retrieval considers only the newest immutable version of contracts in the
+active organisation. Contract text is fenced as untrusted evidence in the xAI
+prompt. The model must put a short verbatim quote in each citation marker. A
+server-side verifier normalises case, punctuation, and apostrophes, then looks
+for those words consecutively in the cited version. Only a match receives the
+verified badge and word offsets; a non-match remains visible as unverified.
+The PDF.js side pane searches the original PDF for the exact quote. This proves
+the quote exists in that source version, not that an interpretation is legally
+correct.
 
 Write-like model output is stored as a pending `assistant_action`. Nothing is
 executed until a signed-in user confirms it. Confirmation calls the same
@@ -63,7 +73,11 @@ lifecycle gates, immutable versions, and audit events are not bypassed.
 
 Skills are organisation-scoped Markdown instructions. Owner, admin, and legal
 roles can edit them. Every save inserts an immutable `skill_versions` row while
-the selected current version is supplied transparently to the assistant.
+the selected current version is supplied transparently to the assistant. The
+Skill Creator is selected from conversational intent, asks for missing design
+details, and emits a `create_skill` proposal only after it has purpose, triggers,
+inputs, workflow, output, boundaries, and an example. The existing role check
+still controls whether that draft can be published.
 
 ## External actions
 

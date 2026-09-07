@@ -1,6 +1,8 @@
 """FastCLM FastHTML entry point and browser routes."""
 from __future__ import annotations
 
+import json
+import re
 from urllib.parse import quote
 
 from dotenv import load_dotenv
@@ -8,7 +10,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fasthtml.common import *
-from starlette.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse
+from starlette.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, StreamingResponse
 from starlette.staticfiles import StaticFiles
 
 from fastclm import __version__
@@ -20,7 +22,7 @@ from fastclm.emailer import send_account_action
 from fastclm.reminders import start_scheduler, stop_scheduler
 from fastclm.security import Actor, csrf_valid, token
 from fastclm.services.audit import AuditService
-from fastclm.services.assistant import AssistantService
+from fastclm.services.assistant import AssistantService, find_word_range
 from fastclm.services.contracts import ContractService
 from fastclm.services.credentials import clear_xai_key, key_status, store_xai_key, usage
 from fastclm.services.documents import DocumentService, file_checksum
@@ -288,6 +290,32 @@ async def assistant_ask(request):
         return assistant_page(actor, cockpit, usage(actor.user_id), request.session["csrf_token"], str(exc))
 
 
+@rt("/assistant/stream", methods=["POST"])
+async def assistant_stream(request):
+    actor, data = await _form(request, "assistant.use")
+    if isinstance(actor, Response):
+        return actor
+
+    def events():
+        try:
+            for event in AssistantService().stream(
+                actor,
+                str(data.get("thread_id", "")),
+                str(data.get("question", "")),
+                str(data.get("skill_id", "")),
+                str(data.get("contract_id", "")),
+            ):
+                yield json.dumps(event, ensure_ascii=False) + "\n"
+        except Exception as exc:
+            yield json.dumps({"type": "error", "message": str(exc)}, ensure_ascii=False) + "\n"
+
+    return StreamingResponse(
+        events(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
+    )
+
+
 @rt("/assistant/actions/{action_id}", methods=["POST"])
 async def assistant_action(request, action_id: str):
     actor, data = await _form(request, "assistant.use")
@@ -446,6 +474,34 @@ def version_inline(request, version_id: str):
         return PlainTextResponse("Attachment integrity check failed", status_code=409)
     filename = str(version["source_filename"]).replace('"', "")
     return FileResponse(path, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{filename}"'})
+
+
+@rt("/pdf-provenance", methods=["POST"])
+async def pdf_provenance(request):
+    """Recheck a viewer quote against the tenant-scoped immutable version text."""
+    actor = _required(request, "contracts.view")
+    if isinstance(actor, Response):
+        return actor
+    data = await request.json()
+    match = re.fullmatch(r"/versions/([0-9a-f-]{36})/inline", str(data.get("source", "")))
+    evidence = str(data.get("evidence", "")).strip()[:4000]
+    if not match or not evidence:
+        return JSONResponse({"ok": False, "verified": False})
+    version = get_database().one(
+        "SELECT id,body_text FROM contract_versions WHERE id=? AND organisation_id=? AND media_type='application/pdf'",
+        (match.group(1), actor.organisation_id),
+    )
+    if not version:
+        return PlainTextResponse("PDF attachment not found", status_code=404)
+    start_word, end_word, word_count = find_word_range(evidence, version["body_text"])
+    verified = start_word >= 0
+    return JSONResponse({
+        "ok": verified,
+        "verified": verified,
+        "start_word": start_word,
+        "end_word": end_word,
+        "word_count": word_count,
+    })
 
 
 @rt("/contracts/{contract_id}/obligations", methods=["POST"])

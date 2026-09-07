@@ -29,8 +29,8 @@ def head(title: str, description: str = "Open-source contract lifecycle manageme
         Link(rel="preconnect", href="https://fonts.googleapis.com"),
         Link(rel="preconnect", href="https://fonts.gstatic.com", crossorigin=""),
         Link(rel="stylesheet", href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Newsreader:opsz,wght@6..72,600&display=swap"),
-        Link(rel="stylesheet", href="/static/app.css?v=3"),
-        Script(src="/static/app.js?v=2", defer=True),
+        Link(rel="stylesheet", href="/static/app.css?v=4"),
+        Script(src="/static/app.js?v=3", defer=True),
     )
 
 
@@ -185,29 +185,50 @@ def dashboard_page(actor: Actor, data: dict) -> Html:
     return shell(actor, "dashboard", "Overview", content)
 
 
-def _assistant_message(message: dict, csrf: str) -> Div:
+def _assistant_message(message: dict, csrf: str, actor: Actor) -> Div:
     sources = []
     for source in message.get("citations", []):
         viewer = source.get("media_type") == "application/pdf" and source.get("filename")
+        quote = source.get("quote", "")
         action = (
-            Button("Open PDF", type="button", cls="source-open", onclick=f"openPdf('/versions/{source['version_id']}/inline', {json.dumps(source['filename'])})")
+            Button("Open PDF", type="button", cls="source-open", onclick=f"openPdf('/versions/{source['version_id']}/inline', {json.dumps(source['filename'])}, {json.dumps(quote)})")
             if viewer else A("Open contract", href=f"/contracts/{source['contract_id']}", cls="source-open")
         )
-        sources.append(Div(Span(f"[{source['number']}]", cls="source-number"), Div(Strong(source["title"]), Small(f"{source['reference']} · version {source['version']}")), action, cls="assistant-source"))
+        verification = Span(f"VERIFIED · {source.get('word_count', 0)} WORDS", cls="citation-verified") if source.get("verified") else Span("UNVERIFIED", cls="citation-unverified")
+        sources.append(Div(
+            Span(f"[{source['number']}]", cls="source-number"),
+            Div(Strong(source["title"]), Small(f"{source['reference']} · version {source['version']}"), verification, Details(Summary("Quoted evidence"), Q(quote), cls="citation-evidence") if quote else None),
+            action,
+            cls=f"assistant-source {'verified' if source.get('verified') else 'unverified'}",
+        ))
+    receipts = message.get("tool_runs", [])
+    tool_receipts = Details(
+        Summary(Span("✓", cls="receipt-check"), f"{len(receipts)} tool receipts"),
+        Div(*[Div(Span(item.get("label", item.get("tool", "Tool"))), Small(item.get("detail", "")), cls="tool-receipt") for item in receipts], cls="tool-receipt-list"),
+        cls="tool-receipts",
+    ) if receipts else None
     actions = []
     for item in message.get("actions", []):
         pending = item["status"] == "pending"
+        permitted = item["tool_name"] != "create_skill" or actor.can("skills.manage")
+        arguments = item.get("arguments", {})
+        draft = Details(
+            Summary("Review proposed skill"),
+            Div(Strong(arguments.get("name", "Untitled skill")), P(arguments.get("description", ""), cls="muted"), Span(arguments.get("jurisdiction", ""), cls="status low"), Pre(arguments.get("instructions", ""), cls="proposal-draft")),
+            cls="proposal-review",
+        ) if item["tool_name"] == "create_skill" else None
         actions.append(Div(
-            Div(Span("HUMAN APPROVAL REQUIRED", cls="eyebrow"), H4(item["summary"]), P(item["tool_name"].replace("_", " ").title(), cls="muted")),
+            Div(Span("HUMAN APPROVAL REQUIRED", cls="eyebrow"), H4(item["summary"]), P(item["tool_name"].replace("_", " ").title(), cls="muted"), draft),
             Div(
-                Form(Input(type="hidden", name="csrf", value=csrf), Input(type="hidden", name="decision", value="confirm"), Button("Confirm action", cls="button small"), action=f"/assistant/actions/{item['id']}", method="post") if pending else None,
+                Form(Input(type="hidden", name="csrf", value=csrf), Input(type="hidden", name="decision", value="confirm"), Button("Confirm action", cls="button small"), action=f"/assistant/actions/{item['id']}", method="post") if pending and permitted else None,
                 Form(Input(type="hidden", name="csrf", value=csrf), Input(type="hidden", name="decision", value="cancel"), Button("Dismiss", cls="button secondary small"), action=f"/assistant/actions/{item['id']}", method="post") if pending else status_badge(item["status"]),
+                Span("An admin or legal user must publish this skill.", cls="muted") if pending and not permitted else None,
                 cls="inline-actions",
             ),
             cls="assistant-proposal",
         ))
     return Div(
-        Div(Span("You" if message["role"] == "user" else "AI", cls="message-avatar"), Div(P(message["content"], cls="message-copy"), Div(*sources, cls="assistant-sources") if sources else None, *actions), cls="message-inner"),
+        Div(Span("You" if message["role"] == "user" else "AI", cls="message-avatar"), Div(tool_receipts, P(message["content"], cls="message-copy"), Div(*sources, cls="assistant-sources") if sources else None, *actions), cls="message-inner"),
         cls=f"assistant-message {message['role']}",
     )
 
@@ -226,7 +247,7 @@ def assistant_page(actor: Actor, data: dict, usage: dict, csrf: str, notice: str
             Div(Span("xAI", cls="assistant-model"), Span(f"{usage['remaining']} included" if not usage["has_byok"] else "BYOK active", cls="muted"), cls="inline-actions"),
             cls="assistant-head",
         ),
-        Div(*[_assistant_message(message, csrf) for message in data["messages"]], id="assistant-messages", cls="assistant-messages"),
+        Div(*[_assistant_message(message, csrf, actor) for message in data["messages"]], id="assistant-messages", cls="assistant-messages"),
         Form(
             Input(type="hidden", name="csrf", value=csrf),
             Input(type="hidden", name="thread_id", value=data["thread"]["id"]),
@@ -237,7 +258,7 @@ def assistant_page(actor: Actor, data: dict, usage: dict, csrf: str, notice: str
                 Button("Ask FastCLM", cls="button", id="assistant-send"),
                 cls="assistant-compose-actions",
             ),
-            action="/assistant/ask", method="post", id="assistant-form", cls="assistant-composer",
+            action="/assistant/ask", method="post", id="assistant-form", cls="assistant-composer", data_stream_url="/assistant/stream",
         ),
         cls="assistant-center",
     )

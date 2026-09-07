@@ -164,6 +164,13 @@ async function locatePositionedEvidence(pageNumber, evidence, scanned) {
     });
     if (!response.ok) return false;
     const result = await response.json();
+    if (result.ok && result.verified && !result.rect) {
+      showEvidence('Exact quoted words verified in this source version. ' + evidence);
+      matchInfo.textContent = 'Verified in source';
+      notify('provenance', {page: pageNumber, verified: true,
+                            startWord: result.start_word, endWord: result.end_word});
+      return true;
+    }
     if (!result.ok || !result.rect) return false;
     // The locator may find the evidence on a neighbouring page when the citation
     // was off by a page — render and jump to the page it is actually on.

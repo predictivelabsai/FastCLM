@@ -19,11 +19,15 @@ Updated: 2026-09-07
 - Private integration API with fleet-compatible discovery, pagination,
   generated documentation and committed OpenAPI; Docker/Coolify assets; and
   responsive public/product surfaces.
-- Assistant-first legal-work cockpit with persistent conversations,
-  organisation-scoped retrieval, source cards, an authenticated PDF.js pane,
-  and confirmation-gated write proposals.
-- Transparent, editable Markdown skills library with four starter contract
-  capabilities and immutable, attributable version history.
+- Assistant-first legal-work cockpit with persistent conversations, streamed
+  tokens and tool activity, durable execution receipts, organisation-scoped
+  retrieval, and confirmation-gated write proposals.
+- Word-level citation verification against immutable source versions, with
+  unsupported quotations explicitly marked unverified and exact-quote search
+  in the authenticated PDF.js pane.
+- Transparent, editable Markdown skills library with five starter contract
+  capabilities, conversational skill creation, human-reviewed publication,
+  and immutable, attributable version history.
 - Deterministic Playwright product capture, validated screenshot manifest,
   README walkthrough, and the same animated walkthrough on the landing page.
 
@@ -32,8 +36,8 @@ Updated: 2026-09-07
 - Team invitations, role administration, organisation switching, and SCIM.
 - OCR for scanned PDFs, malware scanning, object storage, retention controls,
   and encrypted backups.
-- Streaming assistant activity, character-level citation verification,
-  multi-matter memory, and conversational skill creation/refinement.
+- Page-aware and character-offset citation anchoring, multi-matter memory, and
+  conversational skill testing/refinement against example documents.
 - Clause insertion, redlining/diff, comments, mentions, assignments, template
   assembly, and negotiated fallback playbooks.
 - Configurable multi-stage approval policies with delegation and separation of

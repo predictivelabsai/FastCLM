@@ -24,14 +24,17 @@ Connect and a token-gated integration API are optional.
 
 - Organisation-isolated workspaces with owner, administrator, legal,
   approver, and member roles.
-- Assistant-first contract workspace with persistent conversations,
-  organisation-scoped document retrieval, visible source versions, and xAI.
+- Assistant-first contract workspace with persistent conversations, streamed
+  xAI tokens, live tool activity, and durable tool receipts.
+- Organisation-scoped retrieval with exact source versions and word-level
+  quote verification. Unsupported quotes are visibly marked unverified.
 - Confirmation-gated action proposals: the assistant can prepare work but
   cannot silently approve, sign, activate, terminate, or change access.
 - Transparent organisation skill library with editable Markdown instructions,
-  starter contract workflows, and immutable version history.
-- Source-aware PDF.js side pane for checking an answer against the uploaded
-  original without leaving the conversation.
+  five starter workflows, immutable version history, and a conversational
+  Skill Creator that drafts a reviewable skill proposal.
+- Source-aware PDF.js side pane that opens the uploaded original and searches
+  for the assistant's exact quoted evidence without leaving the conversation.
 - Contract register with search, status filters, counterparties, commercial
   value, dates, ownership, renewal terms, and risk level.
 - Reviewed lifecycle transitions from draft through review, approval,
@@ -117,9 +120,11 @@ explicit organisation header. API writes also require an authorised member ID
 for permission checks and audit attribution. Uploaded files are stored outside
 the source tree and served only after session, tenant, and original-file
 checksum checks. Review findings are assistive signals, not legal advice.
-PDF sources use the same checks before inline viewing. Skill instructions and
-assistant messages are workspace-scoped. Assistant answers are assistive
-signals, not legal advice.
+PDF sources use the same checks before inline viewing. Skill instructions,
+assistant messages, and tool receipts are workspace-scoped. Citation
+verification checks whether the quoted words occur consecutively in the cited
+immutable version; it does not prove the model's interpretation. Assistant
+answers are assistive signals, not legal advice.
 
 FastCLM ships with synthetic data only. Do not load production agreements into
 an unreviewed demo deployment.

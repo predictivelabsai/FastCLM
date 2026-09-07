@@ -86,6 +86,8 @@ def main() -> None:
             errors: list[str] = []
             page.on("console", lambda message: errors.append(message.text) if message.type == "error" else None)
             page.goto(f"{BASE}/auth/test", wait_until="networkidle")
+            page.get_by_text("tool receipts", exact=False).click()
+            page.get_by_text("Quoted evidence", exact=True).click()
             shot(page, "02-ai-assistant.png")
             page.get_by_text("Open PDF", exact=True).click()
             page.locator("#pdf-overlay.open").wait_for()

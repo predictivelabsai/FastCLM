@@ -44,16 +44,27 @@ Review liability, indemnities, termination, renewal, payment, confidentiality, d
 Identify who must do what, by when, under which clause, and whether it repeats. Cite the source. If a due date depends on an event, preserve that dependency rather than inventing a calendar date. Propose obligation records, but never create them without explicit human confirmation.
 """,
     ),
+    (
+        "skill-creator",
+        "Skill Creator",
+        "Use conversation to design, test, and propose a reusable legal workflow skill.",
+        """# Skill Creator
+
+Help the user turn their legal workflow into a reusable skill through conversation, not a form. Establish the purpose, trigger phrases, required inputs, workflow, output format, legal boundaries, and at least one concrete example. Ask one focused question at a time when material details are missing. Never invent the user's legal positions.
+
+When the user has supplied enough detail, draft complete Markdown instructions and use the create_skill proposal tool. The skill is not saved until the user reviews and confirms the proposal.
+""",
+    ),
 )
 
 
 class SkillService:
     def seed(self, organisation_id: str, user_id: str) -> None:
-        if get_database().scalar("SELECT COUNT(*) FROM skills WHERE organisation_id=?", (organisation_id,)):
-            return
         created = now()
         with get_database().transaction() as tx:
             for slug, name, description, instructions in STARTER_SKILLS:
+                if tx.one("SELECT id FROM skills WHERE organisation_id=? AND slug=?", (organisation_id, slug)):
+                    continue
                 skill_id = new_id()
                 values = (skill_id, organisation_id, slug, name, description, instructions, user_id, user_id, created, created)
                 tx.execute(
@@ -66,6 +77,11 @@ class SkillService:
                     "VALUES (?,?,?,?,?,?,?,?,?,?)",
                     (new_id(), organisation_id, skill_id, 1, name, description, instructions, "UK / EU", user_id, created),
                 )
+
+    def by_slug(self, actor: Actor, slug: str) -> dict | None:
+        actor.require("assistant.use")
+        row = get_database().one("SELECT id FROM skills WHERE organisation_id=? AND slug=? AND status='active'", (actor.organisation_id, slug))
+        return self.get(actor, row["id"]) if row else None
 
     def list(self, actor: Actor, include_archived: bool = False) -> list[dict]:
         actor.require("assistant.use")

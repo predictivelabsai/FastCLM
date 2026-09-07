@@ -1,10 +1,10 @@
-function openPdf(url, filename) {
+function openPdf(url, filename, quote) {
   var overlay = document.getElementById('pdf-overlay');
   var frame = document.getElementById('pdf-frame');
   var title = document.getElementById('pdf-title');
   if (!overlay || !frame) return;
   title.textContent = filename || 'Contract PDF';
-  frame.src = '/static/pdfjs/viewer.html?file=' + encodeURIComponent(url);
+  frame.src = '/static/pdfjs/viewer.html?file=' + encodeURIComponent(url) + (quote ? '#search=' + encodeURIComponent(quote) : '');
   overlay.classList.add('open');
   document.body.style.overflow = 'hidden';
 }
@@ -69,6 +69,101 @@ function skillHtmlToMarkdown(host) {
   return blocks.join('\n\n') + '\n';
 }
 
+function streamElement(tag, className, text) {
+  var node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text != null) node.textContent = text;
+  return node;
+}
+
+function streamVisibleText(raw) {
+  var visible = raw.replace(/\[\[cite:(\d+)\|[\s\S]*?\]\]/g, '[$1]');
+  var unfinished = visible.lastIndexOf('[[cite:');
+  if (unfinished >= 0 && visible.indexOf(']]', unfinished) < 0) visible = visible.slice(0, unfinished);
+  return visible;
+}
+
+function appendStreamingMessage(messages, role, text) {
+  var message = streamElement('div', 'assistant-message ' + role);
+  var inner = streamElement('div', 'message-inner');
+  inner.appendChild(streamElement('span', 'message-avatar', role === 'user' ? 'You' : 'AI'));
+  var body = streamElement('div', 'stream-message-body');
+  var receipts = streamElement('div', 'stream-receipts');
+  var copy = streamElement('p', 'message-copy', text || '');
+  body.appendChild(receipts);
+  body.appendChild(copy);
+  inner.appendChild(body);
+  message.appendChild(inner);
+  messages.appendChild(message);
+  messages.scrollTop = messages.scrollHeight;
+  return {message: message, receipts: receipts, copy: copy};
+}
+
+function updateStreamingActivity(receipts, event) {
+  var id = 'stream-tool-' + String(event.tool || 'tool').replace(/[^a-z0-9_-]/gi, '-');
+  var row = receipts.querySelector('#' + id);
+  if (!row) {
+    row = streamElement('div', 'stream-receipt running');
+    row.id = id;
+    row.appendChild(streamElement('span', 'stream-tool-icon', '↻'));
+    row.appendChild(streamElement('span', 'stream-tool-label', event.label || event.tool));
+    receipts.appendChild(row);
+  }
+  row.classList.toggle('running', event.status === 'running');
+  row.classList.toggle('complete', event.status === 'complete');
+  row.querySelector('.stream-tool-icon').textContent = event.status === 'complete' ? '✓' : '↻';
+  row.querySelector('.stream-tool-label').textContent = event.label || event.tool;
+  row.title = event.detail || '';
+}
+
+async function submitAssistantStream(form) {
+  var messages = document.getElementById('assistant-messages');
+  var question = document.getElementById('assistant-question');
+  var button = document.getElementById('assistant-send');
+  if (!messages || !question || !question.value.trim()) return;
+  var text = question.value.trim();
+  var payload = new FormData(form);
+  appendStreamingMessage(messages, 'user', text);
+  var live = appendStreamingMessage(messages, 'assistant', '');
+  var raw = '';
+  button.disabled = true;
+  button.textContent = 'Working…';
+  question.value = '';
+  try {
+    var response = await fetch(form.dataset.streamUrl, {method: 'POST', body: payload, headers: {'Accept': 'application/x-ndjson'}});
+    if (!response.ok || !response.body) throw new Error('Assistant stream could not be opened.');
+    var reader = response.body.getReader();
+    var decoder = new TextDecoder();
+    var buffer = '';
+    while (true) {
+      var part = await reader.read();
+      buffer += decoder.decode(part.value || new Uint8Array(), {stream: !part.done});
+      var lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      lines.forEach(function (line) {
+        if (!line.trim()) return;
+        var event = JSON.parse(line);
+        if (event.type === 'activity') updateStreamingActivity(live.receipts, event);
+        if (event.type === 'token') {
+          raw += event.text || '';
+          live.copy.textContent = streamVisibleText(raw);
+        }
+        if (event.type === 'complete') live.copy.textContent = event.answer || streamVisibleText(raw);
+        if (event.type === 'error') throw new Error(event.message || 'Assistant request failed.');
+      });
+      messages.scrollTop = messages.scrollHeight;
+      if (part.done) break;
+    }
+    window.setTimeout(function () { window.location.reload(); }, 500);
+  } catch (error) {
+    live.copy.textContent = error.message || 'Assistant request failed.';
+    live.message.classList.add('stream-error');
+    button.disabled = false;
+    button.textContent = 'Ask FastCLM';
+    question.value = text;
+  }
+}
+
 document.addEventListener('keydown', function (event) {
   if (event.key === 'Escape') closePdf();
   if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
@@ -82,9 +177,9 @@ document.addEventListener('DOMContentLoaded', function () {
   if (messages) messages.scrollTop = messages.scrollHeight;
   if (document.getElementById('skill-instructions')) setSkillMode('prose');
   var form = document.getElementById('assistant-form');
-  if (form) form.addEventListener('submit', function () {
-    var button = document.getElementById('assistant-send');
-    if (button) { button.disabled = true; button.textContent = 'Working…'; }
+  if (form && form.dataset.streamUrl && window.ReadableStream) form.addEventListener('submit', function (event) {
+    event.preventDefault();
+    submitAssistantStream(form);
   });
   var skillEditor = document.getElementById('skill-instructions');
   if (skillEditor && skillEditor.form) skillEditor.form.addEventListener('submit', function () {
