@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import hashlib
 import re
 from pathlib import Path
 
@@ -21,6 +22,14 @@ MAX_BYTES = 15 * 1024 * 1024
 def safe_filename(value: str) -> str:
     name = Path(value or "contract").name
     return re.sub(r"[^A-Za-z0-9._ -]+", "_", name)[:180]
+
+
+def file_checksum(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def extract_text(filename: str, content: bytes) -> str:
@@ -54,4 +63,5 @@ class DocumentService:
         return service.snapshot(
             actor, contract_id, f"Imported {clean}", source_filename=clean,
             storage_path=str(relative), media_type=ALLOWED[suffix], byte_size=len(content),
+            source_checksum=hashlib.sha256(content).hexdigest(),
         )

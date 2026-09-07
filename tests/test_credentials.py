@@ -29,3 +29,17 @@ def test_platform_allowance_is_atomic_and_bounded(workspace, monkeypatch):
     with pytest.raises(QueryLimitExceeded):
         authorize(actor.user_id)
     assert usage(actor.user_id)["used"] == 2
+
+
+def test_failed_platform_review_refunds_reserved_allowance(workspace, monkeypatch):
+    from fastclm.services.contracts import ContractService
+    from fastclm.services.review import ReviewService
+
+    actor, _, _ = workspace
+    monkeypatch.setattr(credentials, "settings", replace(settings, xai_api_key="platform-test-key", free_query_limit=5))
+    contract = ContractService().create(actor, {"title": "AI review agreement"})
+    ContractService().add_block(actor, contract["id"], "clause", "Either party may terminate on notice.")
+    monkeypatch.setattr(ReviewService, "_xai", lambda *args: (_ for _ in ()).throw(RuntimeError("provider unavailable")))
+    with pytest.raises(RuntimeError, match="provider unavailable"):
+        ReviewService().review(actor, contract["id"], use_ai=True)
+    assert usage(actor.user_id)["used"] == 0

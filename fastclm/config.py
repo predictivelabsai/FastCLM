@@ -36,6 +36,8 @@ class Settings:
     free_query_limit: int
     postmark_api_token: str
     from_email: str
+    reminder_scheduler_enabled: bool
+    reminder_interval_seconds: int
     signwell_api_key: str
     signwell_test_mode: bool
 
@@ -61,13 +63,15 @@ class Settings:
             google_redirect_uri=os.getenv("GOOGLE_REDIRECT_URI", "").strip(),
             google_allowed_domains=_csv("GOOGLE_ALLOWED_DOMAINS"),
             google_allowed_emails=_csv("GOOGLE_ALLOWED_EMAILS"),
-            api_token=os.getenv("FASTCLM_API_TOKEN", "").strip(),
+            api_token=(os.getenv("FASTCLM_API_TOKEN", "") or os.getenv("FASTSME_API_TOKEN", "")).strip(),
             xai_api_key=os.getenv("XAI_API_KEY", "").strip(),
             xai_base_url=os.getenv("XAI_BASE_URL", "https://api.x.ai/v1").rstrip("/"),
             xai_model=os.getenv("XAI_MODEL", "grok-4-1-fast-reasoning").strip(),
             free_query_limit=max(0, int(os.getenv("FASTCLM_FREE_QUERY_LIMIT", "5"))),
             postmark_api_token=os.getenv("POSTMARK_API_TOKEN", "").strip(),
             from_email=os.getenv("FROM_EMAIL", "info@fastsme.com").strip(),
+            reminder_scheduler_enabled=os.getenv("FASTCLM_REMINDER_SCHEDULER_ENABLED", "false").lower() == "true",
+            reminder_interval_seconds=max(300, int(os.getenv("FASTCLM_REMINDER_INTERVAL_SECONDS", "3600"))),
             signwell_api_key=os.getenv("SIGNWELL_API_KEY", "").strip(),
             signwell_test_mode=os.getenv("SIGNWELL_TEST_MODE", "true").lower() == "true",
         )

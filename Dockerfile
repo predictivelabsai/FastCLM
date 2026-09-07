@@ -13,9 +13,10 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY pyproject.toml README.md LICENSE ./
 COPY fastclm ./fastclm
+COPY web ./web
 COPY migrations ./migrations
 COPY static ./static
-COPY web_app.py seed.py ./
+COPY web_app.py seed.py swagger.json ./
 RUN python -m pip install --no-cache-dir .
 
 RUN useradd --create-home --uid 10001 fastclm \

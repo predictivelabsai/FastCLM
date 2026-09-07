@@ -56,57 +56,6 @@ def product_mock() -> Div:
     )
 
 
-def landing_page() -> Html:
-    description = "Upload, review, approve, sign, and manage contracts, obligations, and renewals in one open workspace."
-    features = (
-        ("One contract record", "Keep Word and PDF originals, editable blocks, counterparties, commercial facts, and immutable versions together."),
-        ("Governed lifecycle", "Move from draft to review, approval, signature, and active management through explicit, audited gates."),
-        ("Dates that do work", "Track obligations, notice windows, renewals, expiry, and accountable owners before deadlines become surprises."),
-    )
-    return Html(
-        head("Open contract management", description, "/"),
-        Body(
-            Header(
-                logo(),
-                Nav(
-                    A("Developers", href="/developers", cls="public-link"),
-                    A("API", href="/api/v1/docs", cls="public-link"),
-                    A("Sign In", href="/login", cls="public-signin"),
-                    cls="public-links",
-                ),
-                cls="public-nav",
-            ),
-            Main(
-                Section(
-                    Div(
-                        P("OPEN CONTRACT LIFECYCLE MANAGEMENT", cls="eyebrow"),
-                        H1("Know what you agreed—and what happens next."),
-                        P(description, cls="hero-copy"),
-                        Div(A("Create your workspace", href="/signup", cls="button"), A("Explore the API", href="/developers", cls="button secondary"), cls="hero-actions"),
-                        P("MIT licensed · SQLite included · Your documents stay private", cls="proof"),
-                    ),
-                    Div(product_mock(), cls="hero-product"),
-                    cls="hero",
-                ),
-                Section(
-                    Div(*[
-                        Article(Span(f"0{index}", cls="num"), H2(title), P(copy), cls="feature-card")
-                        for index, (title, copy) in enumerate(features, 1)
-                    ], cls="feature-grid"),
-                    cls="feature-band",
-                ),
-                Section(
-                    Div(P("DEVELOPERS", cls="eyebrow"), H2("Integrate without opening your contracts."), P("Use the private, organisation-scoped API, generated OpenAPI schema, and electronic-signature adapter contracts. Data endpoints stay disabled until an API token is configured.")),
-                    Div(A("Developer guide", href="/developers", cls="button"), A("Open API docs", href="/api/v1/docs", cls="button secondary"), cls="hero-actions"),
-                    cls="public-section",
-                ),
-            ),
-            Footer(Span("FastCLM is part of the open-source FastSME suite."), A("View all products", href="https://fastsme.com/products", cls="quiet-link"), cls="public-footer"),
-            cls="public-body",
-        ),
-    )
-
-
 def auth_page(mode: str = "login", error: str = "", notice: str = "") -> Html:
     signup = mode == "signup"
     return Html(
@@ -280,7 +229,7 @@ def _editor(contract: dict, csrf: str, editable: bool):
     return Div(*blocks)
 
 
-def contract_detail_page(actor: Actor, contract: dict, csrf: str, usage: dict, notice: str = "") -> Html:
+def contract_detail_page(actor: Actor, contract: dict, counterparties: list[dict], csrf: str, usage: dict, notice: str = "") -> Html:
     editable = actor.can("contracts.edit") and contract["status"] in {"draft", "review"}
     allowed_transitions = [target for target in contract["next_statuses"] if not (contract["status"] == "approval" and target == "signature")]
     transitions = [Form(Input(type="hidden", name="csrf", value=csrf), Input(type="hidden", name="target", value=target), Button(f"Move to {target.title()}", cls="button small"), action=f"/contracts/{contract['id']}/transition", method="post") for target in allowed_transitions] if actor.can("contracts.transition") else []
@@ -306,6 +255,49 @@ def contract_detail_page(actor: Actor, contract: dict, csrf: str, usage: dict, n
             Div(Span("Renewal"), Strong(contract["renewal_type"].title()), cls="detail"),
             cls="detail-grid",
         ),
+        Section(
+            Div(H3("Contract details"), Span("Editable in draft and review", cls="muted"), cls="subhead"),
+            Form(
+                Input(type="hidden", name="csrf", value=csrf),
+                Div(
+                    Label("Title", Input(name="title", value=contract["title"], required=True)),
+                    Label("Counterparty", Select(Option("No counterparty", value=""), *[
+                        Option(item["name"], value=item["id"], selected=item["id"] == contract["counterparty_id"])
+                        for item in counterparties
+                    ], name="counterparty_id")),
+                    cls="form-row",
+                ),
+                Div(
+                    Label("Type", Input(name="contract_type", value=contract["contract_type"])),
+                    Label("Jurisdiction", Input(name="jurisdiction", value=contract["jurisdiction"])),
+                    cls="form-row",
+                ),
+                Label("Summary", Textarea(contract["summary"], name="summary", rows="3")),
+                Div(
+                    Label("Value", Input(name="value_amount", value=contract["value_amount"], inputmode="decimal")),
+                    Label("Currency", Input(name="currency", value=contract["currency"], minlength="3", maxlength="3")),
+                    cls="form-row",
+                ),
+                Div(
+                    Label("Effective date", Input(type="date", name="effective_date", value=contract["effective_date"])),
+                    Label("Expiry date", Input(type="date", name="expiry_date", value=contract["expiry_date"])),
+                    cls="form-row",
+                ),
+                Div(
+                    Label("Notice deadline", Input(type="date", name="notice_date", value=contract["notice_date"])),
+                    Label("Renewal", Select(*[
+                        Option(value.title(), value=value, selected=value == contract["renewal_type"])
+                        for value in ("none", "manual", "automatic")
+                    ], name="renewal_type")),
+                    cls="form-row",
+                ),
+                Button("Save contract details", cls="button small"),
+                action=f"/contracts/{contract['id']}/details",
+                method="post",
+                cls="form-stack",
+            ),
+            cls="panel",
+        ) if editable else None,
         Div(
             Div(
                 Section(
@@ -374,36 +366,3 @@ def settings_page(actor: Actor, key: dict, usage: dict, csrf: str, notice: str =
         cls="page-scroll",
     )
     return shell(actor, "settings", "Settings", content)
-
-
-def developer_page() -> Html:
-    resources = (
-        ("Contracts", "Search lifecycle records and retrieve version and obligation metadata.", "/api/v1/contracts"),
-        ("Obligations", "Read due work across agreements for reporting or workflow automation.", "/api/v1/obligations"),
-        ("Counterparties", "Connect contract relationships to finance, CRM, and vendor systems.", "/api/v1/counterparties"),
-        ("Electronic signatures", "Prepare provider-neutral requests for DocuSign and SignWell without automatic dispatch.", "/contracts/{id}/signatures"),
-    )
-    return Html(
-        head("Developer platform", "Private FastCLM API, OpenAPI schemas, and electronic-signature adapter contracts.", "/developers"),
-        Body(
-            Header(logo(), Nav(A("API docs", href="/api/v1/docs", cls="public-link"), A("Sign In", href="/login", cls="public-signin"), cls="public-links"), cls="public-nav"),
-            Main(
-                Div(
-                    P("DEVELOPER PLATFORM · API V1", cls="eyebrow"), H1("Build on FastCLM without making contracts public."),
-                    P("The integration API is private, versioned, and organisation-scoped. Configure a server-side bearer token, then send the workspace ID explicitly on every data request.", cls="dev-lede"),
-                    Div(A("Open Swagger UI", href="/api/v1/docs", cls="button"), A("Open ReDoc", href="/api/v1/redoc", cls="button secondary"), A("Download OpenAPI", href="/api/v1/openapi.json", cls="button secondary"), A("View source", href="https://github.com/predictivelabsai/FastCLM", cls="button secondary"), cls="hero-actions"),
-                    Div(Strong("Private by default. "), "Data endpoints return 503 until FASTCLM_API_TOKEN is configured. They then require Authorization: Bearer <token> and X-FastCLM-Organisation: <workspace-id>.", cls="callout"),
-                    Div(*[Article(H2(title), P(copy), Code(Span("GET " if route.startswith("/api") else "POST ", cls="method"), route, cls="route"), cls="dev-card") for title, copy, route in resources], cls="dev-grid"),
-                    H2("Quick start"),
-                    Pre(Code(f'''curl "{settings.public_url}/api/v1/contracts?limit=20" \\
-  -H "Authorization: Bearer $FASTCLM_API_TOKEN" \\
-  -H "X-FastCLM-Organisation: $FASTCLM_ORGANISATION_ID"'''), cls="code"),
-                    H2("Signature providers"),
-                    P("The current adapters create reviewable local payloads only. SignWell maps to POST /api/v1/documents with X-Api-Key authentication, draft/test-mode controls, recipients, metadata, and source-version context. DocuSign maps to an envelope draft. Dispatch and webhook processing remain deliberately gated follow-up work.", cls="dev-lede"),
-                    P(A("SignWell create-document reference ↗", href="https://developers.signwell.com/reference/createdocument", target="_blank", rel="noopener noreferrer", cls="quiet-link")),
-                    cls="dev-wrap",
-                ),
-            ),
-            cls="public-body",
-        ),
-    )

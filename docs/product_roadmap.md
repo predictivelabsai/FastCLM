@@ -13,9 +13,10 @@ Updated: 2026-09-07
   editable blocks; immutable checksummed versions.
 - UK/EU starter clause library and assistive deterministic/xAI review.
 - Five per-user platform-funded xAI reviews followed by encrypted BYOK.
-- Idempotent Postmark obligation reminder runner.
+- Idempotent, retry-safe Postmark obligation reminder scheduler.
 - Reviewable DocuSign and SignWell payload stubs.
-- Private integration API, generated documentation, Docker/Coolify assets, and
+- Private integration API with fleet-compatible discovery, pagination,
+  generated documentation and committed OpenAPI; Docker/Coolify assets; and
   responsive public/product surfaces.
 
 ## Next production increments
@@ -29,8 +30,7 @@ Updated: 2026-09-07
   duties.
 - Explicitly confirmed SignWell/DocuSign dispatch, webhook signature
   verification, signer status, completed-PDF retrieval, and evidence trails.
-- Scheduled worker deployment, reminder preferences, escalation paths, and
-  Postmark templates.
+- Reminder preferences, escalation paths, and Postmark templates.
 - PostgreSQL repository parity, S3-compatible storage, full-text search, and
   observability.
 - Jurisdiction-specific legal content reviewed by qualified counsel. Current

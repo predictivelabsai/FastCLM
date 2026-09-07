@@ -1,6 +1,8 @@
 """Idempotent Postmark obligation reminder runner."""
 from __future__ import annotations
 
+import asyncio
+import logging
 from datetime import date, timedelta
 
 import httpx
@@ -8,6 +10,10 @@ import httpx
 from fastclm.config import settings
 from fastclm.database import get_database
 from fastclm.services.identity import new_id, now
+
+
+logger = logging.getLogger("fastclm.reminders")
+_scheduler_task: asyncio.Task | None = None
 
 
 def due_reminders() -> list[dict]:
@@ -26,7 +32,11 @@ def run(*, dry_run: bool = False) -> dict:
     delivery_date = date.today().isoformat()
     for item in due_reminders():
         kind = "overdue" if item["due_date"] < delivery_date else "due_soon"
-        if get_database().one("SELECT id FROM reminder_deliveries WHERE obligation_id=? AND recipient_email=? AND reminder_kind=? AND delivery_date=?", (item["id"], item["recipient_email"], kind, delivery_date)):
+        existing = get_database().one(
+            "SELECT id,status FROM reminder_deliveries WHERE obligation_id=? AND recipient_email=? AND reminder_kind=? AND delivery_date=?",
+            (item["id"], item["recipient_email"], kind, delivery_date),
+        )
+        if existing and existing["status"] == "sent":
             skipped += 1
             continue
         if dry_run:
@@ -54,8 +64,44 @@ def run(*, dry_run: bool = False) -> dict:
         except Exception:
             failed += 1
         with get_database().transaction() as tx:
-            tx.execute("INSERT OR IGNORE INTO reminder_deliveries(id,organisation_id,obligation_id,recipient_email,reminder_kind,delivery_date,provider_message_id,status,created_at) VALUES (?,?,?,?,?,?,?,?,?)", (new_id(), item["organisation_id"], item["id"], item["recipient_email"], kind, delivery_date, message_id, status, now()))
+            tx.execute(
+                "INSERT INTO reminder_deliveries(id,organisation_id,obligation_id,recipient_email,reminder_kind,delivery_date,provider_message_id,status,created_at) VALUES (?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(obligation_id,recipient_email,reminder_kind,delivery_date) DO UPDATE SET provider_message_id=excluded.provider_message_id,status=excluded.status,created_at=excluded.created_at",
+                (new_id(), item["organisation_id"], item["id"], item["recipient_email"], kind, delivery_date, message_id, status, now()),
+            )
     return {"sent": sent, "skipped": skipped, "failed": failed}
+
+
+async def _scheduler() -> None:
+    """Run reminders periodically; delivery idempotency makes restarts safe."""
+
+    while True:
+        try:
+            result = await asyncio.to_thread(run)
+            logger.info("Reminder cycle complete: %s", result)
+        except Exception:
+            logger.exception("Reminder cycle failed")
+        await asyncio.sleep(settings.reminder_interval_seconds)
+
+
+def start_scheduler() -> asyncio.Task | None:
+    global _scheduler_task
+    if not settings.reminder_scheduler_enabled or _scheduler_task:
+        return _scheduler_task
+    _scheduler_task = asyncio.create_task(_scheduler(), name="fastclm-reminders")
+    return _scheduler_task
+
+
+async def stop_scheduler() -> None:
+    global _scheduler_task
+    if not _scheduler_task:
+        return
+    _scheduler_task.cancel()
+    try:
+        await _scheduler_task
+    except asyncio.CancelledError:
+        pass
+    _scheduler_task = None
 
 
 if __name__ == "__main__":

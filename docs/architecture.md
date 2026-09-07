@@ -8,7 +8,7 @@ integration surface.
 ```text
 FastHTML workspace ─┐
                     ├─ services ─ transaction boundary ─ SQLite
-FastAPI /api/v1 ────┘       │
+FastAPI /api ────────┘       │
                             ├─ immutable contract versions
 Word / PDF ─ extraction ─ editable blocks
                             ├─ deterministic / xAI review
@@ -25,9 +25,13 @@ Word / PDF ─ extraction ─ editable blocks
 - Contract lifecycle state changes use `fastclm.lifecycle`; AI cannot invoke
   them.
 - API data routes require a server bearer token and an explicit valid
-  organisation header. The API is disabled without a configured token.
+  organisation header. Writes additionally require an authorised workspace
+  member ID so role checks and audit attribution are preserved. The API is
+  disabled without a configured token.
 - Personal xAI keys are encrypted before persistence and never rendered back to
   the browser.
+- Uploaded source files receive their own SHA-256 digest; downloads verify the
+  stored bytes before serving an attachment.
 - Platform-funded review slots are reserved atomically and refunded when the
   provider call fails.
 - Uploaded files are stored under tenant and contract UUID paths, outside the
@@ -45,5 +49,6 @@ OCR is deferred.
 
 The signature adapters create local, reviewable provider payloads. They do not
 send envelopes automatically. The reminder runner is idempotent per obligation,
-recipient, kind, and day; it sends only when invoked by a scheduler and when a
-Postmark token is configured.
+recipient, kind, and day. Production runs it in-process on a configurable
+interval; failed deliveries remain retryable while successful deliveries are
+suppressed for the rest of the day.

@@ -26,6 +26,23 @@ def money(value: str) -> str:
     return format(amount.quantize(Decimal("0.01")), "f")
 
 
+def iso_date(value: str, label: str) -> str:
+    value = value.strip()
+    if not value:
+        return ""
+    try:
+        return date.fromisoformat(value).isoformat()
+    except ValueError as exc:
+        raise ValueError(f"{label} must be a valid date") from exc
+
+
+def currency_code(value: str) -> str:
+    value = value.strip().upper() or "GBP"
+    if len(value) != 3 or not value.isalpha():
+        raise ValueError("Currency must be a three-letter code")
+    return value
+
+
 def blocks_to_text(blocks: list[dict]) -> str:
     return "\n\n".join(str(block["content"]).strip() for block in blocks if str(block["content"]).strip())
 
@@ -116,10 +133,14 @@ class ContractService:
             str(data.get("contract_type", "Commercial agreement")).strip() or "Commercial agreement",
             str(data.get("jurisdiction", "England and Wales")).strip() or "England and Wales",
             str(data.get("summary", "")).strip(), money(str(data.get("value_amount", ""))),
-            str(data.get("currency", "GBP")).strip().upper()[:3] or "GBP",
-            str(data.get("effective_date", "")), str(data.get("expiry_date", "")), str(data.get("notice_date", "")),
+            currency_code(str(data.get("currency", "GBP"))),
+            iso_date(str(data.get("effective_date", "")), "Effective date"),
+            iso_date(str(data.get("expiry_date", "")), "Expiry date"),
+            iso_date(str(data.get("notice_date", "")), "Notice date"),
             str(data.get("renewal_type", "none")), created, created,
         )
+        if params[14] not in {"none", "manual", "automatic"}:
+            raise ValueError("Unsupported renewal type")
         with db.transaction() as tx:
             tx.execute(
                 "INSERT INTO contracts(id,organisation_id,counterparty_id,owner_user_id,reference,title,contract_type,jurisdiction,summary,value_amount,currency,effective_date,expiry_date,notice_date,renewal_type,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -128,6 +149,58 @@ class ContractService:
             tx.execute("INSERT INTO contract_blocks(id,organisation_id,contract_id,position,block_type,content,updated_at) VALUES (?,?,?,?,?,?,?)", (new_id(), actor.organisation_id, contract_id, 0, "heading", title, created))
             AuditService().record(actor, "contract", contract_id, "contract.created", {"reference": reference}, tx)
         self.snapshot(actor, contract_id, "Initial draft")
+        return self._contract(actor, contract_id)
+
+    def update(self, actor: Actor, contract_id: str, data: dict) -> dict:
+        """Update draft metadata without bypassing version or lifecycle controls."""
+
+        actor.require("contracts.edit")
+        item = self._contract(actor, contract_id)
+        if item["status"] not in {"draft", "review"}:
+            raise ValueError("Only draft or review contract details can be edited")
+        title = str(data.get("title", "")).strip()
+        if not title:
+            raise ValueError("Contract title is required")
+        counterparty_id = str(data.get("counterparty_id", "")).strip() or None
+        db = get_database()
+        if counterparty_id and not db.one(
+            "SELECT id FROM counterparties WHERE id=? AND organisation_id=?",
+            (counterparty_id, actor.organisation_id),
+        ):
+            raise ValueError("Counterparty is not in this workspace")
+        renewal_type = str(data.get("renewal_type", "none"))
+        if renewal_type not in {"none", "manual", "automatic"}:
+            raise ValueError("Unsupported renewal type")
+        updated = now()
+        values = (
+            counterparty_id,
+            title,
+            str(data.get("contract_type", "Commercial agreement")).strip() or "Commercial agreement",
+            str(data.get("jurisdiction", "England and Wales")).strip() or "England and Wales",
+            str(data.get("summary", "")).strip(),
+            money(str(data.get("value_amount", ""))),
+            currency_code(str(data.get("currency", "GBP"))),
+            iso_date(str(data.get("effective_date", "")), "Effective date"),
+            iso_date(str(data.get("expiry_date", "")), "Expiry date"),
+            iso_date(str(data.get("notice_date", "")), "Notice date"),
+            renewal_type,
+            updated,
+            contract_id,
+            actor.organisation_id,
+        )
+        with db.transaction() as tx:
+            tx.execute(
+                "UPDATE contracts SET counterparty_id=?,title=?,contract_type=?,jurisdiction=?,summary=?,value_amount=?,currency=?,effective_date=?,expiry_date=?,notice_date=?,renewal_type=?,updated_at=? WHERE id=? AND organisation_id=?",
+                values,
+            )
+            AuditService().record(
+                actor,
+                "contract",
+                contract_id,
+                "contract.updated",
+                {"fields": ["counterparty", "title", "type", "jurisdiction", "summary", "value", "dates", "renewal"]},
+                tx,
+            )
         return self._contract(actor, contract_id)
 
     def transition(self, actor: Actor, contract_id: str, target: str) -> dict:
@@ -189,19 +262,21 @@ class ContractService:
             tx.execute("UPDATE contracts SET updated_at=? WHERE id=?", (updated, contract_id))
             AuditService().record(actor, "contract", contract_id, "document.imported", {"blocks": len(blocks)}, tx)
 
-    def snapshot(self, actor: Actor, contract_id: str, label: str = "Saved version", *, source_filename: str = "", storage_path: str = "", media_type: str = "", byte_size: int = 0) -> dict:
+    def snapshot(self, actor: Actor, contract_id: str, label: str = "Saved version", *, source_filename: str = "", storage_path: str = "", media_type: str = "", byte_size: int = 0, source_checksum: str = "") -> dict:
         actor.require("contracts.edit")
         blocks = self.blocks(actor, contract_id)
         body = blocks_to_text(blocks)
         content_json = json.dumps([{"type": block["block_type"], "content": block["content"]} for block in blocks], ensure_ascii=False)
-        checksum = hashlib.sha256((content_json + source_filename).encode()).hexdigest()
+        checksum = hashlib.sha256(
+            content_json.encode() + b"\0" + source_checksum.encode()
+        ).hexdigest()
         db = get_database()
         number = int(db.scalar("SELECT COALESCE(MAX(version_number),0)+1 FROM contract_versions WHERE contract_id=?", (contract_id,)) or 1)
         version_id, created = new_id(), now()
         with db.transaction() as tx:
             tx.execute(
-                "INSERT INTO contract_versions(id,organisation_id,contract_id,version_number,label,body_text,content_json,source_filename,storage_path,media_type,byte_size,checksum,created_by,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (version_id, actor.organisation_id, contract_id, number, label.strip(), body, content_json, source_filename, storage_path, media_type, byte_size, checksum, actor.user_id, created),
+                "INSERT INTO contract_versions(id,organisation_id,contract_id,version_number,label,body_text,content_json,source_filename,storage_path,media_type,byte_size,checksum,source_checksum,created_by,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (version_id, actor.organisation_id, contract_id, number, label.strip(), body, content_json, source_filename, storage_path, media_type, byte_size, checksum, source_checksum, actor.user_id, created),
             )
             AuditService().record(actor, "contract", contract_id, "version.created", {"version": number, "filename": source_filename, "checksum": checksum}, tx)
         return db.one("SELECT * FROM contract_versions WHERE id=?", (version_id,))
@@ -216,9 +291,10 @@ class ContractService:
         recurrence = str(data.get("recurrence", "none"))
         if recurrence not in {"none", "monthly", "quarterly", "annual"}:
             raise ValueError("Unsupported recurrence")
+        due_date = iso_date(str(data.get("due_date", "")), "Due date")
         with get_database().transaction() as tx:
-            tx.execute("INSERT INTO obligations(id,organisation_id,contract_id,title,description,owner_user_id,due_date,recurrence,created_at) VALUES (?,?,?,?,?,?,?,?,?)", (obligation_id, actor.organisation_id, contract_id, title, str(data.get("description", "")).strip(), actor.user_id, str(data.get("due_date", "")), recurrence, created))
-            AuditService().record(actor, "obligation", obligation_id, "obligation.created", {"contract_id": contract_id, "due_date": str(data.get("due_date", ""))}, tx)
+            tx.execute("INSERT INTO obligations(id,organisation_id,contract_id,title,description,owner_user_id,due_date,recurrence,created_at) VALUES (?,?,?,?,?,?,?,?,?)", (obligation_id, actor.organisation_id, contract_id, title, str(data.get("description", "")).strip(), actor.user_id, due_date, recurrence, created))
+            AuditService().record(actor, "obligation", obligation_id, "obligation.created", {"contract_id": contract_id, "due_date": due_date}, tx)
         return get_database().one("SELECT * FROM obligations WHERE id=?", (obligation_id,))
 
     def complete_obligation(self, actor: Actor, obligation_id: str) -> None:

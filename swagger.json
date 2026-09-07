@@ -1,0 +1,670 @@
+{
+  "components": {
+    "schemas": {
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "ObligationCreate": {
+        "additionalProperties": false,
+        "description": "Integration-safe obligation creation request.",
+        "properties": {
+          "contract_id": {
+            "minLength": 1,
+            "title": "Contract Id",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "maxLength": 4000,
+            "title": "Description",
+            "type": "string"
+          },
+          "due_date": {
+            "default": "",
+            "maxLength": 10,
+            "title": "Due Date",
+            "type": "string"
+          },
+          "recurrence": {
+            "default": "none",
+            "pattern": "^(none|monthly|quarterly|annual)$",
+            "title": "Recurrence",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 240,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "contract_id",
+          "title"
+        ],
+        "title": "ObligationCreate",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "FastCLM API token": {
+        "description": "All contract data requires `Authorization: Bearer <token>` and an `X-FastCLM-Organisation` workspace identifier.",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "contact": {
+      "name": "FastSME",
+      "url": "https://fastsme.com/"
+    },
+    "description": "Private, organisation-scoped contract integration API. Contract data is never public.\n\nAll data calls require a bearer token and `X-FastCLM-Organisation`. Selected writes also require `X-FastCLM-Actor` so permissions and audit attribution remain explicit.",
+    "license": {
+      "name": "MIT"
+    },
+    "title": "FastCLM Integration API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/": {
+      "get": {
+        "operationId": "api_discovery",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Discovery",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Discovery",
+        "tags": [
+          "System"
+        ]
+      }
+    },
+    "/v1/contracts": {
+      "get": {
+        "operationId": "list_contracts",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 200,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-FastCLM-Organisation",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-Fastclm-Organisation",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Contracts",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "FastCLM API token": []
+          }
+        ],
+        "summary": "Contracts",
+        "tags": [
+          "Contracts"
+        ]
+      }
+    },
+    "/v1/contracts/{contract_id}": {
+      "get": {
+        "operationId": "get_contract",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "contract_id",
+            "required": true,
+            "schema": {
+              "title": "Contract Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-FastCLM-Organisation",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-Fastclm-Organisation",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Contract",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "FastCLM API token": []
+          }
+        ],
+        "summary": "Contract",
+        "tags": [
+          "Contracts"
+        ]
+      }
+    },
+    "/v1/counterparties": {
+      "get": {
+        "operationId": "list_counterparties",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 250,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-FastCLM-Organisation",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-Fastclm-Organisation",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Counterparties",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "FastCLM API token": []
+          }
+        ],
+        "summary": "Counterparties",
+        "tags": [
+          "Counterparties"
+        ]
+      }
+    },
+    "/v1/counterparties/{counterparty_id}": {
+      "get": {
+        "operationId": "get_counterparty",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "counterparty_id",
+            "required": true,
+            "schema": {
+              "title": "Counterparty Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-FastCLM-Organisation",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-Fastclm-Organisation",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Counterparty",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "FastCLM API token": []
+          }
+        ],
+        "summary": "Counterparty",
+        "tags": [
+          "Counterparties"
+        ]
+      }
+    },
+    "/v1/health": {
+      "get": {
+        "operationId": "api_health",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Health",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "System"
+        ]
+      }
+    },
+    "/v1/obligations": {
+      "get": {
+        "operationId": "list_obligations",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "open",
+              "pattern": "^(|open|complete|waived)$",
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 250,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-FastCLM-Organisation",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-Fastclm-Organisation",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Obligations",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "FastCLM API token": []
+          }
+        ],
+        "summary": "Obligations",
+        "tags": [
+          "Obligations"
+        ]
+      },
+      "post": {
+        "operationId": "create_obligation",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-FastCLM-Actor",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-Fastclm-Actor",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-FastCLM-Organisation",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-Fastclm-Organisation",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ObligationCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Obligation",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "FastCLM API token": []
+          }
+        ],
+        "summary": "Create Obligation",
+        "tags": [
+          "Obligations"
+        ]
+      }
+    },
+    "/v1/obligations/{obligation_id}": {
+      "get": {
+        "operationId": "get_obligation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "obligation_id",
+            "required": true,
+            "schema": {
+              "title": "Obligation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-FastCLM-Organisation",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-Fastclm-Organisation",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Obligation",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "FastCLM API token": []
+          }
+        ],
+        "summary": "Obligation",
+        "tags": [
+          "Obligations"
+        ]
+      }
+    }
+  },
+  "servers": [
+    {
+      "description": "Production",
+      "url": "https://clm.fastsme.com/api"
+    }
+  ]
+}

@@ -14,6 +14,11 @@ Copy `.env.coolify.sample` into Coolify's environment editor and replace every
 blank secret. Generate `FASTCLM_SECRET` and `FASTCLM_API_TOKEN` independently.
 Never commit their values.
 
+Set `FASTCLM_REMINDER_SCHEDULER_ENABLED=true` for the single-process container.
+The default hourly cycle is retry-safe and records successful or failed
+Postmark delivery attempts without sending a duplicate successful reminder on
+the same day.
+
 Google Auth Platform must have this exact authorised redirect URI:
 
 ```text
@@ -27,6 +32,7 @@ propagates and Coolify provisions TLS, verify:
 
 ```bash
 curl -fsS https://clm.fastsme.com/healthz
+curl -fsS https://clm.fastsme.com/api/v1/health
 curl -fsSI https://clm.fastsme.com/
 curl -fsSI https://clm.fastsme.com/auth/google
 ```

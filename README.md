@@ -26,7 +26,8 @@ Connect and a token-gated integration API are optional.
 - Deterministic risk review that surfaces common commercial terms without
   making legal decisions or changing contract state.
 - Google OIDC with state validation and verified-email allowlists.
-- Authenticated FastAPI integration routes and generated OpenAPI docs.
+- Authenticated, organisation-scoped FastAPI routes with paginated reads,
+  an audited obligation write, generated OpenAPI docs, and a committed schema.
 - Responsive public landing page and workspace, health/SEO endpoints, Docker,
   and Coolify-ready configuration for `clm.fastsme.com`.
 
@@ -63,7 +64,11 @@ Disable that route in production.
 - Counterparties: `/counterparties`
 - Clause library: `/clauses`
 - Audit trail: `/audit`
-- API documentation: `/api/v1/docs`
+- Developer guide: `/developers`
+- API discovery: `/api/`
+- API documentation: `/api/docs`
+- Runtime OpenAPI: `/api/openapi.json`
+- Stable OpenAPI snapshot: `/swagger.json`
 - Health: `/healthz`
 
 ## Deployment
@@ -76,9 +81,10 @@ Coolify variables and DNS/TLS checklist.
 
 Contract content is private. API data routes are disabled until
 `FASTCLM_API_TOKEN` is configured and then require both a bearer token and an
-explicit organisation header. Uploaded files are stored outside the source
-tree and served only after session and tenant checks. Review findings are
-assistive signals, not legal advice.
+explicit organisation header. API writes also require an authorised member ID
+for permission checks and audit attribution. Uploaded files are stored outside
+the source tree and served only after session, tenant, and original-file
+checksum checks. Review findings are assistive signals, not legal advice.
 
 FastCLM ships with synthetic data only. Do not load production agreements into
 an unreviewed demo deployment.

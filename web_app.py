@@ -8,22 +8,21 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fasthtml.common import *
-from starlette.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
-from starlette.routing import Route
+from starlette.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from starlette.staticfiles import StaticFiles
 
 from fastclm import __version__
-from fastclm.api import api
 from fastclm.auth import google_authorize_url, google_enabled, google_exchange
 from fastclm.bootstrap import ensure_demo, initialize
 from fastclm.config import settings
 from fastclm.database import get_database
 from fastclm.emailer import send_account_action
+from fastclm.reminders import start_scheduler, stop_scheduler
 from fastclm.security import Actor, csrf_valid, token
 from fastclm.services.audit import AuditService
 from fastclm.services.contracts import ContractService
 from fastclm.services.credentials import clear_xai_key, key_status, store_xai_key, usage
-from fastclm.services.documents import DocumentService
+from fastclm.services.documents import DocumentService, file_checksum
 from fastclm.services.identity import IdentityService
 from fastclm.services.review import ReviewService
 from fastclm.services.signatures import SignatureService
@@ -36,12 +35,14 @@ from fastclm.web.ui import (
     contracts_page,
     counterparties_page,
     dashboard_page,
-    developer_page,
-    landing_page,
     obligations_page,
     settings_page,
     recovery_page,
 )
+from web.api import api
+from web.developer import developer_page
+from web.landing import landing_page
+from web.seo import register_seo_routes
 
 
 app, rt = fast_app(
@@ -53,12 +54,18 @@ app, rt = fast_app(
     sess_https_only=settings.public_url.startswith("https://"),
 )
 app.mount("/static", StaticFiles(directory=settings.root / "static"), name="static")
-app.mount("/api/v1", api)
+app.mount("/api", api)
 
 
 @app.on_event("startup")
 async def startup() -> None:
     initialize()
+    start_scheduler()
+
+
+@app.on_event("shutdown")
+async def shutdown() -> None:
+    await stop_scheduler()
 
 
 def _login(session: dict, user: dict, organisation: dict) -> None:
@@ -101,11 +108,19 @@ def _contract_page(request, contract_id: str, notice: str = ""):
     actor = _required(request, "contracts.view")
     if isinstance(actor, Response):
         return actor
+    service = ContractService()
     try:
-        contract = ContractService().get(actor, contract_id)
+        contract = service.get(actor, contract_id)
     except LookupError:
         return PlainTextResponse("Contract not found", status_code=404)
-    return contract_detail_page(actor, contract, request.session["csrf_token"], usage(actor.user_id), notice)
+    return contract_detail_page(
+        actor,
+        contract,
+        service.counterparties(actor),
+        request.session["csrf_token"],
+        usage(actor.user_id),
+        notice,
+    )
 
 
 @rt("/")
@@ -287,6 +302,19 @@ async def contract_transition(request, contract_id: str):
     return RedirectResponse(f"/contracts/{contract_id}?notice={quote(message)}", status_code=303)
 
 
+@rt("/contracts/{contract_id}/details", methods=["POST"])
+async def contract_update(request, contract_id: str):
+    actor, data = await _form(request, "contracts.edit")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        ContractService().update(actor, contract_id, dict(data))
+        message = "Contract details updated"
+    except Exception as exc:
+        message = str(exc)
+    return RedirectResponse(f"/contracts/{contract_id}?notice={quote(message)}", status_code=303)
+
+
 @rt("/contracts/{contract_id}/blocks", methods=["POST"])
 async def block_add(request, contract_id: str):
     actor, data = await _form(request, "contracts.edit")
@@ -353,6 +381,8 @@ def version_download(request, version_id: str):
     root = settings.upload_dir.resolve()
     if root not in path.parents or not path.is_file():
         return PlainTextResponse("Attachment not found", status_code=404)
+    if version["source_checksum"] and file_checksum(path) != version["source_checksum"]:
+        return PlainTextResponse("Attachment integrity check failed", status_code=409)
     return FileResponse(path, media_type=version["media_type"], filename=version["source_filename"])
 
 
@@ -511,6 +541,11 @@ def developers():
     return developer_page()
 
 
+@rt("/swagger.json")
+def swagger_schema():
+    return JSONResponse(api.openapi())
+
+
 @rt("/healthz")
 def healthz():
     try:
@@ -526,20 +561,11 @@ def healthz():
         "database": {"status": database_status, "dialect": "sqlite", "migrations": migrations},
         "ai": {"provider": "xai", "model": settings.xai_model, "platform_key": "configured" if settings.xai_api_key else "disabled"},
         "email": "configured" if settings.postmark_api_token else "disabled",
+        "reminders": {"scheduler": "enabled" if settings.reminder_scheduler_enabled else "disabled"},
     }, status_code=200 if database_status == "ok" else 503)
 
 
-def robots(_request):
-    return PlainTextResponse(f"User-agent: *\nAllow: /\nDisallow: /app\nDisallow: /contracts\nDisallow: /obligations\nDisallow: /counterparties\nDisallow: /clauses\nDisallow: /audit\nDisallow: /settings\nSitemap: {settings.public_url}/sitemap.xml\n")
-
-
-def sitemap(_request):
-    body = '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + f"<url><loc>{settings.public_url}/</loc></url><url><loc>{settings.public_url}/developers</loc></url></urlset>"
-    return Response(body, media_type="application/xml")
-
-
-app.router.routes.insert(0, Route("/sitemap.xml", sitemap, methods=["GET"]))
-app.router.routes.insert(0, Route("/robots.txt", robots, methods=["GET"]))
+register_seo_routes(app)
 
 
 serve(host="0.0.0.0", port=settings.port, reload=False)

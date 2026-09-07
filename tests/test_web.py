@@ -10,14 +10,22 @@ def test_public_landing_health_and_developer_surface(fresh_db):
         assert "Know what you agreed" in landing.text
         assert "Sign In" in landing.text
         assert 'href="/developers"' in landing.text
-        assert 'href="/api/v1/docs"' in landing.text
+        assert 'href="/api/docs"' in landing.text
+        assert '"@type":"SoftwareApplication"' in landing.text
         health = client.get("/healthz")
         assert health.status_code == 200
         assert health.json()["product"] == "FastCLM"
         developers = client.get("/developers")
         assert "organisation-scoped" in developers.text
-        assert client.get("/api/v1/status").status_code == 200
+        assert 'href="/swagger.json"' in developers.text
+        assert client.get("/api/v1/health").status_code == 200
         assert client.get("/api/v1/contracts").status_code == 503
+        assert client.get("/api/docs").status_code == 200
+        assert client.get("/swagger.json").status_code == 200
+        assert "clm.fastsme.com/developers" in client.get("/sitemap.xml").text
+        robots = client.get("/robots.txt").text
+        assert "Disallow: /app" in robots
+        assert "Disallow: /api/" in robots
 
 
 def test_signup_creates_authenticated_workspace(fresh_db):
