@@ -195,7 +195,8 @@ def _assistant_message(message: dict, csrf: str, actor: Actor) -> Div:
             Button("Open PDF", type="button", cls="source-open", onclick=f"openPdf('/versions/{source['version_id']}/inline', {json.dumps(source['filename'])}, {json.dumps(quote)})")
             if viewer else A("Open contract", href=f"/contracts/{source['contract_id']}", cls="source-open")
         )
-        verification = Span(f"VERIFIED · {source.get('word_count', 0)} WORDS", cls="citation-verified") if source.get("verified") else Span("UNVERIFIED", cls="citation-unverified")
+        location = f"PAGE {source['page']} · " if source.get("page") else ""
+        verification = Span(f"VERIFIED · {location}{source.get('word_count', 0)} WORDS · CHARS {source.get('start_char', 0)}–{source.get('end_char', 0)}", cls="citation-verified") if source.get("verified") else Span("UNVERIFIED", cls="citation-unverified")
         sources.append(Div(
             Span(f"[{source['number']}]", cls="source-number"),
             Div(Strong(source["title"]), Small(f"{source['reference']} · version {source['version']}"), verification, Details(Summary("Quoted evidence"), Q(quote), cls="citation-evidence") if quote else None),
@@ -217,7 +218,7 @@ def _assistant_message(message: dict, csrf: str, actor: Actor) -> Div:
             Summary("Review proposed skill"),
             Div(Strong(arguments.get("name", "Untitled skill")), P(arguments.get("description", ""), cls="muted"), Span(arguments.get("jurisdiction", ""), cls="status low"), Pre(arguments.get("instructions", ""), cls="proposal-draft")),
             cls="proposal-review",
-        ) if item["tool_name"] == "create_skill" else None
+        ) if item["tool_name"] in {"create_skill", "revise_skill"} else None
         actions.append(Div(
             Div(Span("HUMAN APPROVAL REQUIRED", cls="eyebrow"), H4(item["summary"]), P(item["tool_name"].replace("_", " ").title(), cls="muted"), draft),
             Div(
@@ -245,7 +246,12 @@ def assistant_page(actor: Actor, data: dict, usage: dict, csrf: str, notice: str
                 P("Ask, investigate, compare, and prepare work from one conversation.", cls="muted"),
                 Div(notice, cls="alert error assistant-alert") if notice else None,
             ),
-            Div(Span("xAI", cls="assistant-model"), Span(f"{usage['remaining']} included" if not usage["has_byok"] else "BYOK active", cls="muted"), cls="inline-actions"),
+            Div(
+                Span("xAI", cls="assistant-model"),
+                Span(f"{usage['remaining']} included" if not usage["has_byok"] else "BYOK active", cls="muted"),
+                Form(Input(type="hidden", name="csrf", value=csrf), Button("New matter", cls="button secondary small"), action="/assistant/threads", method="post"),
+                cls="inline-actions",
+            ),
             cls="assistant-head",
         ),
         Div(*[_assistant_message(message, csrf, actor) for message in data["messages"]], id="assistant-messages", cls="assistant-messages"),
@@ -254,7 +260,7 @@ def assistant_page(actor: Actor, data: dict, usage: dict, csrf: str, notice: str
             Input(type="hidden", name="thread_id", value=data["thread"]["id"]),
             Textarea(name="question", id="assistant-question", rows="3", required=True, placeholder="Ask about a contract, compare terms, find an obligation, or prepare an action…"),
             Div(
-                Select(Option("Use best skill", value=""), *[Option(item["name"], value=item["id"]) for item in skills], name="skill_id", aria_label="Assistant skill"),
+                Select(Option("Use best skill", value="", selected=not data.get("selected_skill_id")), *[Option(item["name"], value=item["id"], selected=item["id"] == data.get("selected_skill_id")) for item in skills], name="skill_id", aria_label="Assistant skill"),
                 Select(Option("All contracts", value=""), *[Option(f"{item['reference']} · {item['title']}", value=item["id"]) for item in contracts], name="contract_id", aria_label="Contract context"),
                 Button("Ask FastCLM", cls="button", id="assistant-send"),
                 cls="assistant-compose-actions",
@@ -264,7 +270,13 @@ def assistant_page(actor: Actor, data: dict, usage: dict, csrf: str, notice: str
         cls="assistant-center",
     )
     rail = Aside(
-        Section(Div(H3("Active context"), Span("READ ONLY", cls="context-safe"), cls="subhead"), P("The assistant searches only contracts and versions in this workspace.", cls="muted"), Div(*[A(Div(Strong(item["title"]), Small(item["reference"])), status_badge(item["status"]), href=f"/contracts/{item['id']}", cls="context-contract") for item in contracts[:4]], cls="context-list"), cls="assistant-rail-section"),
+        Section(
+            Div(H3("Matter memory"), Span("CONFIRMED", cls="context-safe") if data["thread"].get("memory_summary") else Span("READ ONLY", cls="context-safe"), cls="subhead"),
+            P(data["thread"].get("memory_summary") or "Ask the assistant to remember the contracts and outcome for this matter.", cls="muted"),
+            Div(*[A(Div(Strong(item["title"]), Small(item["reference"])), status_badge(item["status"]), href=f"/contracts/{item['id']}", cls="context-contract") for item in (data.get("matter_contracts") or contracts[:4])], cls="context-list"),
+            Div(*[A(item["title"], href=f"/app?thread={item['id']}", cls="tab" if item["id"] != data["thread"]["id"] else "tab active") for item in data["threads"][:6]], cls="tabs"),
+            cls="assistant-rail-section",
+        ),
         Section(Div(H3("Capabilities"), A("Edit library", href="/skills", cls="quiet-link"), cls="subhead"), Div(*[A(Div(Strong(item["name"]), Small(item["description"])), Span(f"v{item['current_version']}", cls="skill-version"), href=f"/skills/{item['id']}", cls="capability-card") for item in skills], cls="capability-list"), cls="assistant-rail-section"),
         Section(H3("Control boundary"), P("Sources are visible. Record changes are proposals until you confirm them. The assistant cannot approve, sign, activate, terminate, or alter access on its own.", cls="control-note"), cls="assistant-rail-section"),
         cls="assistant-rail",
@@ -287,6 +299,10 @@ def skills_page(actor: Actor, skills: list[dict], csrf: str, error: str = "") ->
 
 def skill_detail_page(actor: Actor, skill: dict, csrf: str, error: str = "") -> Html:
     versions = [Div(Strong(f"Version {item['version_number']}"), Small(f"{item['author_name'] or 'System'} · {item['jurisdiction']}"), Small(item["created_at"]), cls="version-row") for item in skill["versions"]]
+    tests = [Div(
+        Div(Strong(f"v{item['skill_version']} · {item['contract_title']}"), Small(item["prompt"]), Small(f"Expected: {item['expected_outcome']}"), cls="identity-copy"),
+        status_badge(item["verdict"]), cls="table-row",
+    ) for item in skill.get("tests", [])]
     editor = Form(
         Input(type="hidden", name="csrf", value=csrf),
         Div(Label("Name", Input(name="name", value=skill["name"], required=True)), Label("Jurisdiction", Input(name="jurisdiction", value=skill["jurisdiction"], required=True)), cls="form-row"),
@@ -296,7 +312,13 @@ def skill_detail_page(actor: Actor, skill: dict, csrf: str, error: str = "") -> 
         Button("Save as new version", cls="button"),
         action=f"/skills/{skill['id']}", method="post", cls="panel form-stack",
     ) if actor.can("skills.manage") else Pre(skill["instructions"], cls="panel skill-preview")
-    content = Div(A("← Skills library", href="/skills", cls="back-link"), Div(error, cls="alert error") if error else None, Div(Section(editor), Section(H3("Version history"), P("Published versions are immutable and attributable.", cls="muted"), Div(*versions, cls="table-card"), cls="panel"), cls="two-column"), cls="page-scroll")
+    history = Section(
+        H3("Version history"), P("Published versions are immutable and attributable.", cls="muted"), Div(*versions, cls="table-card"),
+        H3("Conversational tests"), P("Ask the assistant to test and refine this skill against an example contract. Results are saved only after confirmation.", cls="muted"),
+        Div(*tests, cls="table-card") if tests else P("No confirmed tests yet.", cls="muted"),
+        A("Test in assistant", href=f"/app?skill={skill['id']}", cls="button secondary small"), cls="panel",
+    )
+    content = Div(A("← Skills library", href="/skills", cls="back-link"), Div(error, cls="alert error") if error else None, Div(Section(editor), history, cls="two-column"), cls="page-scroll")
     return shell(actor, "skills", skill["name"], content)
 
 

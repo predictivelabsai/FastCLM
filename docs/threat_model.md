@@ -29,6 +29,12 @@ tokens, invitation links, SCIM identity mappings, and audit history.
   digest verification before serving or backing up sources.
 - **Model authority:** review is advisory and cannot approve, sign, activate, or
   terminate.
+- **Memory poisoning or scope drift:** matter memory and its contract links are
+  visible proposals until a signed-in user confirms them; linked contract IDs
+  are revalidated against the active tenant before saving or retrieval.
+- **Untraceable skill changes:** conversational tests preserve the tested skill
+  version and example contract, while refinements append an attributable
+  immutable version only after confirmation.
 - **Secret exposure:** environment-only fleet secrets and encrypted per-user
   BYOK values that are never returned to the browser.
 - **Abusive model spend:** atomic five-query allowance and BYOK preference.

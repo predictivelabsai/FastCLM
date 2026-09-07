@@ -29,13 +29,18 @@ Connect and a token-gated integration API are optional.
   and in-session switching between every workspace a user belongs to.
 - Assistant-first contract workspace with persistent conversations, streamed
   xAI tokens, live tool activity, and durable tool receipts.
-- Organisation-scoped retrieval with exact source versions and word-level
-  quote verification. Unsupported quotes are visibly marked unverified.
+- Organisation-scoped retrieval with exact source versions and word-,
+  character-, and page-level quote anchors. Unsupported quotes are visibly
+  marked unverified.
+- Multiple assistant matters with user-confirmed contract links and concise
+  durable memory that scopes future retrieval to the remembered agreements.
 - Confirmation-gated action proposals: the assistant can prepare work but
   cannot silently approve, sign, activate, terminate, or change access.
 - Transparent organisation skill library with editable Markdown instructions,
   five starter workflows, immutable version history, and a conversational
-  Skill Creator that drafts a reviewable skill proposal.
+  Skill Creator that drafts a reviewable skill proposal. Skills can be tested
+  against example contracts and refined into a new immutable version through
+  the same confirmed conversation.
 - Source-aware PDF.js side pane that opens the uploaded original and searches
   for the assistant's exact quoted evidence without leaving the conversation.
 - Contract register with search, status filters, counterparties, commercial
@@ -134,7 +139,8 @@ checksum checks. Review findings are assistive signals, not legal advice.
 PDF sources use the same checks before inline viewing. Skill instructions,
 assistant messages, and tool receipts are workspace-scoped. Citation
 verification checks whether the quoted words occur consecutively in the cited
-immutable version; it does not prove the model's interpretation. Assistant
+immutable version and records exact character/page anchors when available; it
+does not prove the model's interpretation. Assistant
 answers are assistive signals, not legal advice.
 
 Uploads are inspected before persistence. S3-compatible storage requests

@@ -17,7 +17,7 @@ from fastclm.services.identity import new_id, now
 from fastclm.services.skills import SkillService
 
 
-WRITE_TOOLS = {"create_contract", "add_obligation", "transition_contract", "create_skill"}
+WRITE_TOOLS = {"create_contract", "add_obligation", "transition_contract", "create_skill", "set_matter_context", "record_skill_test", "revise_skill"}
 WORD_RE = re.compile(r"[\w]+(?:[’'-][\w]+)*", re.UNICODE)
 CITATION_RE = re.compile(r"\[\[cite:(\d+)\|(.+?)\]\]", re.DOTALL | re.IGNORECASE)
 SKILL_REQUEST_RE = re.compile(r"\b(create|build|make|draft|design|improve|edit|want|need)\b.{0,40}\bskill\b|\bskill\b.{0,40}\b(create|builder|creator)\b", re.IGNORECASE)
@@ -27,6 +27,9 @@ TOOL_DEFINITIONS = [
     {"type": "function", "function": {"name": "add_obligation", "description": "Propose a tracked contract obligation for human confirmation.", "parameters": {"type": "object", "properties": {"contract_id": {"type": "string"}, "title": {"type": "string"}, "description": {"type": "string"}, "due_date": {"type": "string"}, "recurrence": {"type": "string", "enum": ["none", "monthly", "quarterly", "annual"]}}, "required": ["contract_id", "title"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "transition_contract", "description": "Propose a reviewed lifecycle transition for human confirmation.", "parameters": {"type": "object", "properties": {"contract_id": {"type": "string"}, "target": {"type": "string"}}, "required": ["contract_id", "target"], "additionalProperties": False}}},
     {"type": "function", "function": {"name": "create_skill", "description": "Propose a complete reusable assistant skill after conversational discovery. Human confirmation is required.", "parameters": {"type": "object", "properties": {"name": {"type": "string"}, "description": {"type": "string"}, "jurisdiction": {"type": "string"}, "instructions": {"type": "string"}}, "required": ["name", "description", "jurisdiction", "instructions"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "set_matter_context", "description": "Propose remembering multiple contracts and a concise factual summary for this conversation. Human confirmation is required.", "parameters": {"type": "object", "properties": {"contract_ids": {"type": "array", "items": {"type": "string"}, "maxItems": 20}, "summary": {"type": "string"}}, "required": ["contract_ids", "summary"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "record_skill_test", "description": "Propose recording a skill test against an example contract after showing the observed output and evidence. Human confirmation is required.", "parameters": {"type": "object", "properties": {"skill_id": {"type": "string"}, "contract_id": {"type": "string"}, "prompt": {"type": "string"}, "expected_outcome": {"type": "string"}, "observed_output": {"type": "string"}, "verdict": {"type": "string", "enum": ["pass", "fail", "needs_review"]}}, "required": ["skill_id", "contract_id", "prompt", "expected_outcome", "observed_output", "verdict"], "additionalProperties": False}}},
+    {"type": "function", "function": {"name": "revise_skill", "description": "Propose a complete new immutable version of an existing skill after discussing or testing it. Human confirmation is required.", "parameters": {"type": "object", "properties": {"skill_id": {"type": "string"}, "name": {"type": "string"}, "description": {"type": "string"}, "jurisdiction": {"type": "string"}, "instructions": {"type": "string"}}, "required": ["skill_id", "name", "description", "jurisdiction", "instructions"], "additionalProperties": False}}},
 ]
 
 
@@ -51,6 +54,28 @@ def find_word_range(quote: str, body_text: str) -> tuple[int, int, int]:
     return -1, -1, width
 
 
+def find_quote_anchor(quote: str, body_text: str, page_texts: list[str] | tuple[str, ...] = ()) -> dict:
+    """Return word, exact-character, and page anchors for a verified quote."""
+    body_matches = list(WORD_RE.finditer(body_text))
+    quote_words = [_normal_word(item.group(0)) for item in WORD_RE.finditer(quote)]
+    body_words = [_normal_word(item.group(0)) for item in body_matches]
+    width = len(quote_words)
+    if not width:
+        return {"start_word": -1, "end_word": -1, "word_count": 0, "start_char": -1, "end_char": -1, "page": 0}
+    for index in range(len(body_words) - width + 1):
+        if body_words[index:index + width] != quote_words:
+            continue
+        start_char, end_char = body_matches[index].start(), body_matches[index + width - 1].end()
+        page_number = 0
+        for page_index, page_text in enumerate(page_texts, 1):
+            page_words = [_normal_word(item.group(0)) for item in WORD_RE.finditer(page_text)]
+            if any(page_words[offset:offset + width] == quote_words for offset in range(len(page_words) - width + 1)):
+                page_number = page_index
+                break
+        return {"start_word": index, "end_word": index + width - 1, "word_count": width, "start_char": start_char, "end_char": end_char, "page": page_number}
+    return {"start_word": -1, "end_word": -1, "word_count": width, "start_char": -1, "end_char": -1, "page": 0}
+
+
 def verify_word_citations(answer: str, sources: list[dict]) -> tuple[str, list[dict]]:
     """Verify model quotes as consecutive normalized source words."""
     verified: list[dict] = []
@@ -61,17 +86,20 @@ def verify_word_citations(answer: str, sources: list[dict]) -> tuple[str, list[d
         if not 1 <= source_number <= len(sources) or not quote:
             return "[citation not verified]"
         source = sources[source_number - 1]
-        start_word, end_word, word_count = find_word_range(quote, source["body_text"])
-        is_verified = start_word >= 0
-        end_word = end_word if is_verified else -1
-        key = (source_number, start_word, end_word, quote)
+        try:
+            page_texts = json.loads(source.get("page_text_json") or "[]")
+        except (json.JSONDecodeError, TypeError):
+            page_texts = []
+        anchor = find_quote_anchor(quote, source["body_text"], page_texts)
+        is_verified = anchor["start_word"] >= 0
+        key = (source_number, anchor["start_word"], anchor["end_word"], quote)
         if not any(item["key"] == key for item in verified):
             verified.append({
                 "key": key, "number": source_number, "contract_id": source["contract_id"],
                 "version_id": source["version_id"], "title": source["title"], "reference": source["reference"],
                 "version": source["version_number"], "filename": source["source_filename"],
                 "media_type": source["media_type"], "quote": quote, "verified": is_verified,
-                "start_word": start_word, "end_word": end_word, "word_count": word_count,
+                **anchor,
             })
         return f"[{source_number}]" if is_verified else f"[{source_number} · unverified]"
 
@@ -106,10 +134,10 @@ class AssistantService:
             return
         version = get_database().one("SELECT * FROM contract_versions WHERE contract_id=? AND organisation_id=? ORDER BY version_number DESC LIMIT 1", (contract_id, actor.organisation_id))
         contract = ContractService().get(actor, contract_id)
-        quote = "This agreement automatically renews for successive twelve-month terms unless either party gives sixty days written notice."
+        quote = "This agreement automatically renews for successive twelve-month terms unless either party gives sixty days"
         created = now()
         user_message_id, answer_id = new_id(), new_id()
-        source = {"contract_id": contract_id, "version_id": version["id"], "title": contract["title"], "reference": contract["reference"], "version_number": version["version_number"], "source_filename": version["source_filename"], "media_type": version["media_type"], "body_text": version["body_text"]}
+        source = {"contract_id": contract_id, "version_id": version["id"], "title": contract["title"], "reference": contract["reference"], "version_number": version["version_number"], "source_filename": version["source_filename"], "media_type": version["media_type"], "body_text": version["body_text"], "page_text_json": version.get("page_text_json", "[]")}
         _, citations = verify_word_citations(f"[[cite:1|{quote}]]", [source])
         receipts = [
             {"tool": "search_contracts", "label": "Searched contract versions", "status": "complete", "detail": "2 versions considered · 1 source used"},
@@ -139,16 +167,27 @@ class AssistantService:
             message["actions"] = db.rows("SELECT * FROM assistant_actions WHERE message_id=? AND organisation_id=? ORDER BY created_at", (message["id"], actor.organisation_id))
             for action in message["actions"]:
                 action["arguments"] = json.loads(action["arguments_json"] or "{}")
-        return {"thread": thread, "threads": db.rows("SELECT * FROM assistant_threads WHERE organisation_id=? ORDER BY updated_at DESC LIMIT 20", (actor.organisation_id,)), "messages": messages, "skills": SkillService().list(actor), "contracts": ContractService().list(actor)}
+        matter_contracts = db.rows(
+            "SELECT c.* FROM assistant_thread_contracts tc JOIN contracts c ON c.id=tc.contract_id AND c.organisation_id=tc.organisation_id WHERE tc.thread_id=? AND tc.organisation_id=? ORDER BY c.title",
+            (thread["id"], actor.organisation_id),
+        )
+        return {"thread": thread, "threads": db.rows("SELECT * FROM assistant_threads WHERE organisation_id=? ORDER BY updated_at DESC LIMIT 20", (actor.organisation_id,)), "messages": messages, "skills": SkillService().list(actor), "contracts": ContractService().list(actor), "matter_contracts": matter_contracts}
 
-    def _sources(self, actor: Actor, question: str, contract_id: str = "") -> list[dict]:
+    def _sources(self, actor: Actor, question: str, contract_id: str = "", thread_id: str = "") -> list[dict]:
         rows = get_database().rows(
-            "SELECT c.id contract_id,c.title,c.reference,c.counterparty_id,c.jurisdiction,c.status,v.id version_id,v.version_number,v.source_filename,v.media_type,v.body_text FROM contracts c JOIN contract_versions v ON v.contract_id=c.id AND v.organisation_id=c.organisation_id WHERE c.organisation_id=? AND v.version_number=(SELECT MAX(v2.version_number) FROM contract_versions v2 WHERE v2.contract_id=c.id) ORDER BY c.updated_at DESC",
+            "SELECT c.id contract_id,c.title,c.reference,c.counterparty_id,c.jurisdiction,c.status,v.id version_id,v.version_number,v.source_filename,v.media_type,v.body_text,v.page_text_json FROM contracts c JOIN contract_versions v ON v.contract_id=c.id AND v.organisation_id=c.organisation_id WHERE c.organisation_id=? AND v.version_number=(SELECT MAX(v2.version_number) FROM contract_versions v2 WHERE v2.contract_id=c.id) ORDER BY c.updated_at DESC",
             (actor.organisation_id,),
         )
+        remembered = set()
+        if thread_id and not contract_id:
+            remembered = {item["contract_id"] for item in get_database().rows(
+                "SELECT contract_id FROM assistant_thread_contracts WHERE thread_id=? AND organisation_id=?", (thread_id, actor.organisation_id),
+            )}
         wanted, ranked = _terms(question), []
         for row in rows:
             if contract_id and row["contract_id"] != contract_id:
+                continue
+            if remembered and row["contract_id"] not in remembered:
                 continue
             haystack = f"{row['title']} {row['reference']} {row['body_text']}".lower()
             ranked.append((sum(haystack.count(term) for term in wanted) + (100 if contract_id else 0), row))
@@ -170,7 +209,11 @@ class AssistantService:
 
     def _history(self, actor: Actor, thread_id: str) -> list[dict]:
         rows = get_database().rows("SELECT role,content FROM assistant_messages WHERE thread_id=? AND organisation_id=? ORDER BY created_at DESC,rowid DESC LIMIT 12", (thread_id, actor.organisation_id))
-        return list(reversed(rows))
+        history = list(reversed(rows))
+        thread = get_database().one("SELECT memory_summary FROM assistant_threads WHERE id=? AND organisation_id=?", (thread_id, actor.organisation_id))
+        if thread and thread["memory_summary"]:
+            history.insert(0, {"role": "system", "content": f"MATTER MEMORY (user-approved factual context):\n{thread['memory_summary']}"})
+        return history
 
     def _record_user_message(self, actor: Actor, thread_id: str, question: str) -> None:
         created = now()
@@ -188,7 +231,7 @@ class AssistantService:
         self._record_user_message(actor, thread_id, question)
         receipts: list[dict] = []
         yield {"type": "activity", "tool": "search_contracts", "label": "Searching contract versions", "status": "running"}
-        sources = [] if skill and skill["slug"] == "skill-creator" and not contract_id else self._sources(actor, question, contract_id)
+        sources = [] if skill and skill["slug"] == "skill-creator" and not contract_id else self._sources(actor, question, contract_id, thread_id)
         receipt = {"tool": "search_contracts", "label": "Searched contract versions", "status": "complete", "detail": f"{len(sources)} source{'s' if len(sources) != 1 else ''} loaded from this workspace"}
         receipts.append(receipt)
         yield {"type": "activity", **receipt}
@@ -241,6 +284,12 @@ class AssistantService:
             return f"Create contract “{str(arguments.get('title', 'Untitled contract'))[:120]}”"
         if name == "add_obligation":
             return f"Track obligation “{str(arguments.get('title', 'Untitled obligation'))[:120]}”"
+        if name == "set_matter_context":
+            return f"Remember {len(arguments.get('contract_ids', []))} contracts for this matter"
+        if name == "record_skill_test":
+            return f"Record {str(arguments.get('verdict', 'review'))} skill test"
+        if name == "revise_skill":
+            return f"Publish a new version of “{str(arguments.get('name', 'this skill'))[:120]}”"
         return f"Move contract to {str(arguments.get('target', 'the proposed state'))[:80]}"
 
     def _prompt_messages(self, question: str, sources: list[dict], skill: dict | None, history: list[dict]) -> list[dict]:
@@ -253,6 +302,8 @@ The quoted words must occur consecutively in that source. Never fabricate or par
 If evidence is missing, say so. Keep quotations short and answers practical.
 Read/search work can happen immediately. Write tools only create visible proposals for later human confirmation.
 When creating a skill, converse first: establish purpose, triggers, inputs, workflow, output, boundaries, and an example. Do not invent legal positions. Call create_skill only when the draft is complete enough for review.
+When the user asks to test a selected skill, apply it to the selected example contract, show cited output, compare it with an explicit expected outcome, and use record_skill_test. If refinement is requested, discuss the change and use revise_skill with the complete replacement instructions; never silently overwrite a skill.
+When the user asks you to remember a matter involving several agreements, identify only available contract IDs and use set_matter_context with a concise factual summary. Saved matter memory and contract links require confirmation.
 
 ACTIVE SKILL:
 {skill_text}"""
@@ -324,6 +375,13 @@ ACTIVE SKILL:
                 ContractService().transition(actor, str(args.get("contract_id", "")), str(args.get("target", "")))
             elif row["tool_name"] == "create_skill":
                 SkillService().create(actor, args)
+            elif row["tool_name"] == "set_matter_context":
+                self.set_matter_context(actor, row["thread_id"], args.get("contract_ids", []), str(args.get("summary", "")))
+            elif row["tool_name"] == "record_skill_test":
+                SkillService().record_test(actor, args)
+            elif row["tool_name"] == "revise_skill":
+                skill_id = str(args.pop("skill_id", ""))
+                SkillService().update(actor, skill_id, args)
             else:
                 raise ValueError("Unsupported proposal")
         except Exception as exc:
@@ -335,3 +393,33 @@ ACTIVE SKILL:
             tx.execute("UPDATE assistant_actions SET status='confirmed',confirmed_by=?,confirmed_at=? WHERE id=?", (actor.user_id, now(), action_id))
             AuditService().record(actor, "assistant_action", action_id, "assistant.action.confirmed", {"tool": row["tool_name"]}, tx)
         return self.cockpit(actor, row["thread_id"])
+
+    def new_thread(self, actor: Actor, title: str = "New matter") -> dict:
+        actor.require("assistant.use")
+        thread_id, created = new_id(), now()
+        with get_database().transaction() as tx:
+            tx.execute("INSERT INTO assistant_threads(id,organisation_id,created_by,title,created_at,updated_at) VALUES (?,?,?,?,?,?)", (thread_id, actor.organisation_id, actor.user_id, title[:72], created, created))
+            tx.execute("INSERT INTO assistant_messages(id,organisation_id,thread_id,user_id,role,content,created_at) VALUES (?,?,?,?,?,?,?)", (new_id(), actor.organisation_id, thread_id, actor.user_id, "assistant", "What contracts and outcome should I remember for this matter?", created))
+            AuditService().record(actor, "assistant_thread", thread_id, "assistant.thread.created", {"matter": True}, tx)
+        return get_database().one("SELECT * FROM assistant_threads WHERE id=?", (thread_id,))
+
+    def set_matter_context(self, actor: Actor, thread_id: str, contract_ids: list[str], summary: str) -> dict:
+        actor.require("assistant.use")
+        self._thread(actor, thread_id)
+        unique_ids = list(dict.fromkeys(str(item) for item in contract_ids if item))[:20]
+        if not summary.strip() or len(summary) > 4000:
+            raise ValueError("Matter memory requires a concise summary")
+        if unique_ids:
+            found = get_database().rows(
+                f"SELECT id FROM contracts WHERE organisation_id=? AND id IN ({','.join('?' for _ in unique_ids)})",
+                (actor.organisation_id, *unique_ids),
+            )
+            if len(found) != len(unique_ids):
+                raise ValueError("Matter context contains an unavailable contract")
+        with get_database().transaction() as tx:
+            tx.execute("DELETE FROM assistant_thread_contracts WHERE thread_id=? AND organisation_id=?", (thread_id, actor.organisation_id))
+            for contract_id in unique_ids:
+                tx.execute("INSERT INTO assistant_thread_contracts(organisation_id,thread_id,contract_id,created_by,created_at) VALUES (?,?,?,?,?)", (actor.organisation_id, thread_id, contract_id, actor.user_id, now()))
+            tx.execute("UPDATE assistant_threads SET memory_summary=?,updated_at=? WHERE id=? AND organisation_id=?", (summary.strip(), now(), thread_id, actor.organisation_id))
+            AuditService().record(actor, "assistant_thread", thread_id, "assistant.matter_context.updated", {"contract_ids": unique_ids}, tx)
+        return self.cockpit(actor, thread_id)

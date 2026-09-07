@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from fastclm.services.assistant import AssistantService, verify_word_citations
+from fastclm.services.assistant import AssistantService, find_quote_anchor, verify_word_citations
 from fastclm.services.contracts import ContractService
 from fastclm.services.identity import IdentityService, new_id, now
 from fastclm.services.skills import SkillService
@@ -99,6 +99,19 @@ def test_word_level_citations_require_consecutive_source_words():
     assert citations[1]["verified"] is False
 
 
+def test_verified_citation_has_exact_character_and_page_anchor():
+    body = "Page one confidentiality.\n\nPage two says termination requires thirty days notice."
+    anchor = find_quote_anchor(
+        "termination requires thirty days notice",
+        body,
+        ["Page one confidentiality.", "Page two says termination requires thirty days notice."],
+    )
+    assert anchor["page"] == 2
+    assert body[anchor["start_char"]:anchor["end_char"]] == "termination requires thirty days notice"
+    assert anchor["start_word"] == 6
+    assert anchor["end_word"] == 10
+
+
 def test_stream_persists_tokens_tool_receipts_and_verified_citation(workspace, monkeypatch):
     actor, _, _ = workspace
     contract = ContractService().create(actor, {"title": "Streaming NDA", "reference": "STREAM-1"})
@@ -143,3 +156,50 @@ def test_conversation_can_propose_and_confirm_a_new_skill(workspace, monkeypatch
     assert action["tool_name"] == "create_skill"
     AssistantService().decide(actor, action["id"], True)
     assert SkillService().by_slug(actor, "board-minutes-review")["current_version"] == 1
+
+
+def test_confirmed_matter_memory_scopes_multi_contract_retrieval(workspace):
+    actor, _, _ = workspace
+    service = ContractService()
+    contracts = []
+    for reference, title in (("M-1", "Framework"), ("M-2", "Statement of work"), ("OUT", "Unrelated lease")):
+        contract = service.create(actor, {"title": title, "reference": reference})
+        service.add_block(actor, contract["id"], "clause", f"{title} contains shared programme terms.")
+        service.snapshot(actor, contract["id"], "Matter source")
+        contracts.append(contract)
+    thread = AssistantService().new_thread(actor, "Cloud programme")
+    AssistantService().set_matter_context(actor, thread["id"], [contracts[0]["id"], contracts[1]["id"]], "Framework and SOW for the cloud programme.")
+    sources = AssistantService()._sources(actor, "programme terms", thread_id=thread["id"])
+    assert {item["contract_id"] for item in sources} == {contracts[0]["id"], contracts[1]["id"]}
+    cockpit = AssistantService().cockpit(actor, thread["id"])
+    assert cockpit["thread"]["memory_summary"] == "Framework and SOW for the cloud programme."
+    assert len(cockpit["matter_contracts"]) == 2
+
+
+def test_confirmed_conversational_skill_test_and_revision_are_attributable(workspace, fresh_db):
+    actor, _, _ = workspace
+    cockpit = AssistantService().cockpit(actor)
+    skill = cockpit["skills"][0]
+    contract = ContractService().create(actor, {"title": "Example NDA", "reference": "TEST-1"})
+    thread = cockpit["thread"]
+    message_id, created = new_id(), now()
+    with fresh_db.transaction() as tx:
+        tx.execute(
+            "INSERT INTO assistant_messages(id,organisation_id,thread_id,user_id,role,content,created_at) VALUES (?,?,?,?,?,?,?)",
+            (message_id, actor.organisation_id, thread["id"], actor.user_id, "assistant", "The example is ready for review.", created),
+        )
+        test_action, revision_action = new_id(), new_id()
+        tx.execute(
+            "INSERT INTO assistant_actions(id,organisation_id,thread_id,message_id,tool_name,summary,arguments_json,created_at) VALUES (?,?,?,?,?,?,?,?)",
+            (test_action, actor.organisation_id, thread["id"], message_id, "record_skill_test", "Record passing test", json.dumps({"skill_id": skill["id"], "contract_id": contract["id"], "prompt": "Identify the term", "expected_outcome": "Cite the term", "observed_output": "The term was cited.", "verdict": "pass"}), created),
+        )
+        tx.execute(
+            "INSERT INTO assistant_actions(id,organisation_id,thread_id,message_id,tool_name,summary,arguments_json,created_at) VALUES (?,?,?,?,?,?,?,?)",
+            (revision_action, actor.organisation_id, thread["id"], message_id, "revise_skill", "Refine output", json.dumps({"skill_id": skill["id"], "name": skill["name"], "description": skill["description"], "jurisdiction": skill["jurisdiction"], "instructions": skill["instructions"] + "\nAlways state the tested outcome.\n"}), created),
+        )
+    AssistantService().decide(actor, test_action, True)
+    AssistantService().decide(actor, revision_action, True)
+    updated = SkillService().get(actor, skill["id"])
+    assert updated["current_version"] == 2
+    assert updated["tests"][0]["verdict"] == "pass"
+    assert updated["tests"][0]["skill_version"] == 1

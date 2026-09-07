@@ -10,7 +10,8 @@ FastHTML AI cockpit ─┐
                      ├─ services ─ transaction boundary ─ SQLite
 FastAPI /api ─────────┘       │
                               ├─ conversations + durable tool receipts
-                              ├─ verified citations + proposed actions
+                              ├─ page/character citations + proposed actions
+                              ├─ confirmed multi-contract matter memory
 Word / PDF ─ extraction ──────┼─ immutable contract versions
        │ OCR + scan            ├─ local / S3-compatible source objects
        └ page provenance       ├─ retention + encrypted tenant backups
@@ -77,14 +78,15 @@ they arrive. Completed tool receipts, the final answer, citations, and any
 proposals are committed together so a reload shows the durable result.
 
 Retrieval considers only the newest immutable version of contracts in the
-active organisation. Contract text is fenced as untrusted evidence in the xAI
+active organisation, further limited to a matter's confirmed contract links
+when present. Contract text is fenced as untrusted evidence in the xAI
 prompt. The model must put a short verbatim quote in each citation marker. A
 server-side verifier normalises case, punctuation, and apostrophes, then looks
 for those words consecutively in the cited version. Only a match receives the
-verified badge and word offsets; a non-match remains visible as unverified.
-The PDF.js side pane searches the original PDF for the exact quote. This proves
-the quote exists in that source version, not that an interpretation is legally
-correct.
+verified badge, word offsets, exact character bounds, and a page number when
+page provenance exists; a non-match remains visible as unverified. The PDF.js
+side pane searches the original PDF for the exact quote. This proves the quote
+exists in that source version, not that an interpretation is legally correct.
 
 Write-like model output is stored as a pending `assistant_action`. Nothing is
 executed until a signed-in user confirms it. Confirmation calls the same
@@ -98,6 +100,13 @@ Skill Creator is selected from conversational intent, asks for missing design
 details, and emits a `create_skill` proposal only after it has purpose, triggers,
 inputs, workflow, output, boundaries, and an example. The existing role check
 still controls whether that draft can be published.
+
+Each assistant thread can act as a separate matter. Contract links and a short
+factual memory are written only through a confirmed proposal and are included
+in later prompts. A selected skill can be exercised against an example
+contract in conversation; confirmed test records preserve the skill version,
+expected and observed outcomes, and verdict. Refinement creates a new immutable
+skill version rather than rewriting test history.
 
 ## External actions
 

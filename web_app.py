@@ -25,7 +25,7 @@ from fastclm.emailer import send_account_action
 from fastclm.reminders import start_scheduler, stop_scheduler
 from fastclm.security import Actor, csrf_valid, token
 from fastclm.services.audit import AuditService
-from fastclm.services.assistant import AssistantService, find_word_range
+from fastclm.services.assistant import AssistantService, find_quote_anchor
 from fastclm.services.backups import BackupService
 from fastclm.services.contracts import ContractService
 from fastclm.services.credentials import clear_xai_key, key_status, store_xai_key, usage
@@ -361,11 +361,13 @@ async def organisation_switch(request):
 
 
 @rt("/app")
-def workspace(request, thread: str = "", notice: str = ""):
+def workspace(request, thread: str = "", skill: str = "", notice: str = ""):
     actor = _required(request, "assistant.use")
     if isinstance(actor, Response):
         return actor
-    return assistant_page(actor, AssistantService().cockpit(actor, thread), usage(actor.user_id), request.session["csrf_token"], notice)
+    cockpit = AssistantService().cockpit(actor, thread)
+    cockpit["selected_skill_id"] = skill if any(item["id"] == skill for item in cockpit["skills"]) else ""
+    return assistant_page(actor, cockpit, usage(actor.user_id), request.session["csrf_token"], notice)
 
 
 @rt("/overview")
@@ -393,6 +395,15 @@ async def assistant_ask(request):
     except Exception as exc:
         cockpit = AssistantService().cockpit(actor, str(data.get("thread_id", "")))
         return assistant_page(actor, cockpit, usage(actor.user_id), request.session["csrf_token"], str(exc))
+
+
+@rt("/assistant/threads", methods=["POST"])
+async def assistant_thread_create(request):
+    actor, _ = await _form(request, "assistant.use")
+    if isinstance(actor, Response):
+        return actor
+    thread = AssistantService().new_thread(actor)
+    return RedirectResponse(f"/app?thread={thread['id']}", status_code=303)
 
 
 @rt("/assistant/stream", methods=["POST"])
@@ -594,19 +605,21 @@ async def pdf_provenance(request):
     if not match or not evidence:
         return JSONResponse({"ok": False, "verified": False})
     version = get_database().one(
-        "SELECT id,body_text FROM contract_versions WHERE id=? AND organisation_id=? AND media_type='application/pdf'",
+        "SELECT id,body_text,page_text_json FROM contract_versions WHERE id=? AND organisation_id=? AND media_type='application/pdf'",
         (match.group(1), actor.organisation_id),
     )
     if not version:
         return PlainTextResponse("PDF attachment not found", status_code=404)
-    start_word, end_word, word_count = find_word_range(evidence, version["body_text"])
-    verified = start_word >= 0
+    try:
+        pages = json.loads(version["page_text_json"] or "[]")
+    except json.JSONDecodeError:
+        pages = []
+    anchor = find_quote_anchor(evidence, version["body_text"], pages)
+    verified = anchor["start_word"] >= 0
     return JSONResponse({
         "ok": verified,
         "verified": verified,
-        "start_word": start_word,
-        "end_word": end_word,
-        "word_count": word_count,
+        **anchor,
     })
 
 

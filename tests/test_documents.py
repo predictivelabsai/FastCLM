@@ -94,7 +94,8 @@ def test_inline_pdf_repeats_session_tenant_and_integrity_checks(fresh_db, tmp_pa
         assert provenance.status_code == 200
         assert provenance.json() == {
             "ok": True, "verified": True, "start_word": 1,
-            "end_word": 4, "word_count": 4,
+            "end_word": 4, "word_count": 4, "start_char": 5,
+            "end_char": 34, "page": 1,
         }
         assert client.post("/pdf-provenance", json={
             "source": f"/versions/{version['id']}/inline", "evidence": "invented clause",

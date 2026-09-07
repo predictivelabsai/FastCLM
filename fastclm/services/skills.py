@@ -98,6 +98,11 @@ class SkillService:
             "WHERE v.skill_id=? AND v.organisation_id=? ORDER BY v.version_number DESC",
             (skill_id, actor.organisation_id),
         )
+        row["tests"] = get_database().rows(
+            "SELECT t.*,c.title contract_title,c.reference FROM skill_tests t JOIN contracts c ON c.id=t.contract_id AND c.organisation_id=t.organisation_id "
+            "WHERE t.skill_id=? AND t.organisation_id=? ORDER BY t.created_at DESC LIMIT 30",
+            (skill_id, actor.organisation_id),
+        )
         return row
 
     def create(self, actor: Actor, data: dict) -> dict:
@@ -122,6 +127,30 @@ class SkillService:
             )
             AuditService().record(actor, "skill", skill_id, "skill.created", {"slug": slug, "version": 1}, tx)
         return self.get(actor, skill_id)
+
+    def record_test(self, actor: Actor, data: dict) -> dict:
+        actor.require("skills.manage")
+        skill_id, contract_id = str(data.get("skill_id", "")), str(data.get("contract_id", ""))
+        skill = self.get(actor, skill_id)
+        contract = get_database().one("SELECT id FROM contracts WHERE id=? AND organisation_id=?", (contract_id, actor.organisation_id))
+        if not contract:
+            raise LookupError("Example contract not found")
+        prompt = str(data.get("prompt", "")).strip()
+        expected = str(data.get("expected_outcome", "")).strip()
+        observed = str(data.get("observed_output", "")).strip()
+        verdict = str(data.get("verdict", "needs_review"))
+        if verdict not in {"pass", "fail", "needs_review"}:
+            raise ValueError("Unsupported test verdict")
+        if not prompt or not expected or not observed:
+            raise ValueError("Prompt, expected outcome, and observed output are required")
+        test_id, created = new_id(), now()
+        with get_database().transaction() as tx:
+            tx.execute(
+                "INSERT INTO skill_tests(id,organisation_id,skill_id,skill_version,contract_id,prompt,expected_outcome,observed_output,verdict,created_by,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (test_id, actor.organisation_id, skill_id, skill["current_version"], contract_id, prompt[:4000], expected[:4000], observed[:16000], verdict, actor.user_id, created),
+            )
+            AuditService().record(actor, "skill", skill_id, "skill.test.recorded", {"test_id": test_id, "version": skill["current_version"], "contract_id": contract_id, "verdict": verdict}, tx)
+        return get_database().one("SELECT * FROM skill_tests WHERE id=?", (test_id,))
 
     def update(self, actor: Actor, skill_id: str, data: dict) -> dict:
         actor.require("skills.manage")

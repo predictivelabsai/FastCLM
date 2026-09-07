@@ -35,11 +35,12 @@ Updated: 2026-09-07
 - Scanned-PDF OCR with page-level provenance, pre-persistence structural and
   optional ClamAV scanning, local/S3-compatible private object storage,
   opt-in terminal-contract source retention, and encrypted tenant backups.
+- Page- and character-anchored citation verification, confirmation-gated
+  multi-contract matter memory, and conversational skill tests/refinements
+  against example agreements with attributable results and versions.
 
 ## Next production increments
 
-- Page-aware and character-offset citation anchoring, multi-matter memory, and
-  conversational skill testing/refinement against example documents.
 - Clause insertion, redlining/diff, comments, mentions, assignments, template
   assembly, and negotiated fallback playbooks.
 - Configurable multi-stage approval policies with delegation and separation of
