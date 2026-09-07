@@ -12,8 +12,23 @@
 
 Copy `.env.coolify.sample` into Coolify's environment editor and replace every
 blank secret. Generate `FASTCLM_SECRET`, `FASTCLM_API_TOKEN`, and
-`FASTCLM_SCIM_TOKEN` independently.
+`FASTCLM_SCIM_TOKEN` independently. Generate a Fernet key for
+`FASTCLM_BACKUP_ENCRYPTION_KEY` (for example with
+`python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'`)
+and keep it in the same encrypted configuration inventory as the database.
 Never commit their values.
+
+The default `FASTCLM_STORAGE_BACKEND=local` stores source objects and encrypted
+backups on the persistent `/data` volume. To use AWS S3 or a compatible object
+store, set the bucket, region, optional endpoint, credentials, and prefix shown
+in `.env.coolify.sample`, then select `s3`. FastCLM requests AES-256
+server-side encryption unless `FASTCLM_S3_KMS_KEY_ID` is set. Existing versions
+continue reading from the backend recorded when they were created.
+
+The built-in upload inspection is always enabled. For full antivirus scanning,
+point `FASTCLM_CLAMAV_HOST` and `FASTCLM_CLAMAV_PORT` at a private ClamAV daemon;
+uploads fail closed when that configured service cannot be reached. The image
+includes Tesseract English data for scanned-PDF OCR.
 
 SCIM clients use `https://clm.fastsme.com/scim/v2`, authenticate with
 `FASTCLM_SCIM_TOKEN`, and send the target workspace UUID in

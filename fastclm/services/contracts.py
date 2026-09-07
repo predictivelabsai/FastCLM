@@ -262,7 +262,7 @@ class ContractService:
             tx.execute("UPDATE contracts SET updated_at=? WHERE id=?", (updated, contract_id))
             AuditService().record(actor, "contract", contract_id, "document.imported", {"blocks": len(blocks)}, tx)
 
-    def snapshot(self, actor: Actor, contract_id: str, label: str = "Saved version", *, source_filename: str = "", storage_path: str = "", media_type: str = "", byte_size: int = 0, source_checksum: str = "") -> dict:
+    def snapshot(self, actor: Actor, contract_id: str, label: str = "Saved version", *, source_filename: str = "", storage_path: str = "", media_type: str = "", byte_size: int = 0, source_checksum: str = "", storage_backend: str = "local", page_text_json: str = "[]", ocr_applied: bool = False, malware_scan_status: str = "clean", malware_scanner: str = "builtin") -> dict:
         actor.require("contracts.edit")
         blocks = self.blocks(actor, contract_id)
         body = blocks_to_text(blocks)
@@ -275,10 +275,10 @@ class ContractService:
         version_id, created = new_id(), now()
         with db.transaction() as tx:
             tx.execute(
-                "INSERT INTO contract_versions(id,organisation_id,contract_id,version_number,label,body_text,content_json,source_filename,storage_path,media_type,byte_size,checksum,source_checksum,created_by,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (version_id, actor.organisation_id, contract_id, number, label.strip(), body, content_json, source_filename, storage_path, media_type, byte_size, checksum, source_checksum, actor.user_id, created),
+                "INSERT INTO contract_versions(id,organisation_id,contract_id,version_number,label,body_text,content_json,source_filename,storage_path,media_type,byte_size,checksum,source_checksum,created_by,created_at,storage_backend,page_text_json,ocr_applied,malware_scan_status,malware_scanner) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (version_id, actor.organisation_id, contract_id, number, label.strip(), body, content_json, source_filename, storage_path, media_type, byte_size, checksum, source_checksum, actor.user_id, created, storage_backend, page_text_json, int(ocr_applied), malware_scan_status, malware_scanner),
             )
-            AuditService().record(actor, "contract", contract_id, "version.created", {"version": number, "filename": source_filename, "checksum": checksum}, tx)
+            AuditService().record(actor, "contract", contract_id, "version.created", {"version": number, "filename": source_filename, "checksum": checksum, "storage_backend": storage_backend, "ocr_applied": ocr_applied, "malware_scanner": malware_scanner}, tx)
         return db.one("SELECT * FROM contract_versions WHERE id=?", (version_id,))
 
     def add_obligation(self, actor: Actor, contract_id: str, data: dict) -> dict:

@@ -32,8 +32,9 @@ CAPTURES = (
     "11-landing-mobile.png",
     "12-ai-assistant-mobile.png",
     "13-team.png",
+    "14-settings-security.png",
 )
-FRAMES = CAPTURES[1:10] + ("13-team.png",)
+FRAMES = CAPTURES[1:10] + ("13-team.png", "14-settings-security.png")
 
 
 def wait_for_server(process: subprocess.Popen) -> None:
@@ -112,6 +113,11 @@ def main() -> None:
             shot(page, "10-developers.png")
             page.goto(f"{BASE}/team", wait_until="networkidle")
             shot(page, "13-team.png")
+            page.goto(f"{BASE}/settings", wait_until="networkidle")
+            page.get_by_text("Source retention", exact=True).scroll_into_view_if_needed()
+            page.mouse.wheel(0, 900)
+            page.wait_for_timeout(200)
+            shot(page, "14-settings-security.png")
 
             mobile_public = browser.new_context(viewport={"width": 390, "height": 844}, device_scale_factor=1)
             mobile_page = mobile_public.new_page()

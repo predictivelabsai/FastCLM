@@ -21,6 +21,19 @@ class Settings:
     data_dir: Path
     sqlite_path: Path
     upload_dir: Path
+    storage_backend: str
+    s3_bucket: str
+    s3_endpoint_url: str
+    s3_region: str
+    s3_access_key_id: str
+    s3_secret_access_key: str
+    s3_prefix: str
+    s3_kms_key_id: str
+    clamav_host: str
+    clamav_port: int
+    ocr_enabled: bool
+    ocr_language: str
+    backup_key: str
     allow_test_auth: bool
     require_email_verification: bool
     platform_admins: tuple[str, ...]
@@ -56,6 +69,19 @@ class Settings:
             data_dir=data_dir,
             sqlite_path=Path(os.getenv("FASTCLM_DB", str(data_dir / "fastclm.sqlite"))),
             upload_dir=Path(os.getenv("FASTCLM_UPLOAD_DIR", str(data_dir / "uploads"))),
+            storage_backend=os.getenv("FASTCLM_STORAGE_BACKEND", "local").strip().lower(),
+            s3_bucket=os.getenv("FASTCLM_S3_BUCKET", "").strip(),
+            s3_endpoint_url=os.getenv("FASTCLM_S3_ENDPOINT_URL", "").strip(),
+            s3_region=os.getenv("FASTCLM_S3_REGION", "eu-west-1").strip(),
+            s3_access_key_id=os.getenv("FASTCLM_S3_ACCESS_KEY_ID", "").strip(),
+            s3_secret_access_key=os.getenv("FASTCLM_S3_SECRET_ACCESS_KEY", "").strip(),
+            s3_prefix=os.getenv("FASTCLM_S3_PREFIX", "fastclm").strip().strip("/"),
+            s3_kms_key_id=os.getenv("FASTCLM_S3_KMS_KEY_ID", "").strip(),
+            clamav_host=os.getenv("FASTCLM_CLAMAV_HOST", "").strip(),
+            clamav_port=int(os.getenv("FASTCLM_CLAMAV_PORT", "3310")),
+            ocr_enabled=os.getenv("FASTCLM_OCR_ENABLED", "true").lower() == "true",
+            ocr_language=os.getenv("FASTCLM_OCR_LANGUAGE", "eng").strip(),
+            backup_key=(os.getenv("FASTCLM_BACKUP_ENCRYPTION_KEY", "") or os.getenv("FASTCLM_BACKUP_KEY", "")).strip(),
             allow_test_auth=os.getenv("FASTCLM_ALLOW_TEST_AUTH", "false").lower() == "true",
             require_email_verification=os.getenv("FASTCLM_REQUIRE_EMAIL_VERIFICATION", "false").lower() == "true",
             platform_admins=_csv("FASTCLM_PLATFORM_ADMINS"),

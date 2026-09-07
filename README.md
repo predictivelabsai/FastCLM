@@ -13,7 +13,8 @@ append-only audit trail in one focused system.
 [grounded PDF source](screenshots/03-pdf-source.png) ·
 [skills library](screenshots/04-skills-library.png) ·
 [skill editor](screenshots/05-skill-editor.png) ·
-[contract record](screenshots/08-contract-record.png)
+[contract record](screenshots/08-contract-record.png) ·
+[retention and backups](screenshots/14-settings-security.png)
 
 The default installation needs no external services. It runs on FastHTML with
 SQLite, local authentication, deterministic synthetic demonstration data, and
@@ -42,6 +43,10 @@ Connect and a token-gated integration API are optional.
 - Reviewed lifecycle transitions from draft through review, approval,
   signature, active, expiry, or termination.
 - Immutable text/file version history with SHA-256 integrity checks.
+- Scanned-PDF OCR with page provenance, structural upload scanning with an
+  optional ClamAV adapter, and local or S3-compatible encrypted object storage.
+- Opt-in attachment retention for completed contract lifecycles and
+  application-encrypted, tenant-scoped backups containing verified sources.
 - Approval decisions, due and overdue obligations, clause library, renewal and
   notice-window tracking, and append-only activity history.
 - Deterministic risk review that surfaces common commercial terms without
@@ -131,6 +136,12 @@ assistant messages, and tool receipts are workspace-scoped. Citation
 verification checks whether the quoted words occur consecutively in the cited
 immutable version; it does not prove the model's interpretation. Assistant
 answers are assistive signals, not legal advice.
+
+Uploads are inspected before persistence. S3-compatible storage requests
+server-side AES-256 encryption by default or a configured KMS key; workspace
+backups are additionally encrypted by the application. Retention is disabled
+by default and only purges source attachments for expired or terminated
+contracts, preserving version text, checksums, and audit events.
 
 SCIM user routes are independently disabled until `FASTCLM_SCIM_TOKEN` is
 configured. They require that bearer token and an explicit

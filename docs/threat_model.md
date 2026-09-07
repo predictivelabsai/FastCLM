@@ -21,6 +21,12 @@ tokens, invitation links, SCIM identity mappings, and audit history.
   prerequisite for activation.
 - **Document replacement:** immutable snapshots, original attachment retention,
   and SHA-256 checksums.
+- **Hostile uploads:** type/magic checks, active-PDF rejection, bounded Word
+  archive expansion, executable/macro rejection, an antivirus test signature,
+  and optional fail-closed ClamAV scanning before storage.
+- **Storage disclosure/loss:** tenant-prefixed object keys, local path
+  containment, S3 server-side encryption, application-encrypted backups, and
+  digest verification before serving or backing up sources.
 - **Model authority:** review is advisory and cannot approve, sign, activate, or
   terminate.
 - **Secret exposure:** environment-only fleet secrets and encrypted per-user
@@ -31,7 +37,7 @@ tokens, invitation links, SCIM identity mappings, and audit history.
 
 ## Production work still required
 
-Add malware scanning, OCR sandboxing, object-store encryption, backup/restore
-exercises, CSP/security headers at the proxy, rate limiting, configurable RBAC,
+Add OCR process isolation, automated backup restore exercises, ClamAV signature
+operations, CSP/security headers at the proxy, rate limiting, configurable RBAC,
 webhook verification, secret rotation procedures, and an external penetration
 test before handling sensitive production agreements.

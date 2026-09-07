@@ -351,7 +351,26 @@ def contract_detail_page(actor: Actor, contract: dict, counterparties: list[dict
     editable = actor.can("contracts.edit") and contract["status"] in {"draft", "review"}
     allowed_transitions = [target for target in contract["next_statuses"] if not (contract["status"] == "approval" and target == "signature")]
     transitions = [Form(Input(type="hidden", name="csrf", value=csrf), Input(type="hidden", name="target", value=target), Button(f"Move to {target.title()}", cls="button small"), action=f"/contracts/{contract['id']}/transition", method="post") for target in allowed_transitions] if actor.can("contracts.transition") else []
-    versions = [Div(Div(Strong(f"Version {item['version_number']} · {item['label'] or 'Saved version'}"), Small(f"{item['source_filename'] or 'Edited in FastCLM'} · {item['created_at']}")), Div(A("View PDF", href=f"/versions/{item['id']}/inline", target="_blank", cls="button secondary small") if item["media_type"] == "application/pdf" else None, A("Download", href=f"/versions/{item['id']}/download", cls="quiet-link") if item["storage_path"] else None, cls="inline-actions"), P(item["checksum"], cls="checksum"), cls="version-row") for item in contract["versions"]]
+    versions = [Div(
+        Div(
+            Strong(f"Version {item['version_number']} · {item['label'] or 'Saved version'}"),
+            Small(f"{item['source_filename'] or 'Edited in FastCLM'} · {item['created_at']}"),
+            Small(
+                " · ".join(filter(None, [
+                    "OCR" if item.get("ocr_applied") else "",
+                    f"scan: {item.get('malware_scanner', 'builtin')}" if item["storage_path"] else "",
+                    item.get("storage_backend", "local") if item["storage_path"] else "",
+                    "source purged" if item.get("attachment_purged_at") else "",
+                ])), cls="muted",
+            ),
+        ),
+        Div(
+            A("View PDF", href=f"/versions/{item['id']}/inline", target="_blank", cls="button secondary small") if item["media_type"] == "application/pdf" and not item.get("attachment_purged_at") else None,
+            A("Download", href=f"/versions/{item['id']}/download", cls="quiet-link") if item["storage_path"] and not item.get("attachment_purged_at") else None,
+            cls="inline-actions",
+        ),
+        P(item["checksum"], cls="checksum"), cls="version-row",
+    ) for item in contract["versions"]]
     obligations = [Div(Div(H3(item["title"]), P(item["description"], cls="muted")), Div(status_badge(item["status"]), Small(item["due_date"] or "No due date"), cls="table-meta"), cls="table-row") for item in contract["obligations"]]
     approvals = [Div(Div(H3(item["approver_name"]), P(item["comment"] or "No comment", cls="muted")), Div(status_badge(item["decision"]), Small(item["decided_at"]), cls="table-meta"), cls="table-row") for item in contract["approvals"]]
     signatures = [Div(Div(H3(f"{item['provider'].title()} · {item['recipient_name']}"), P(item["recipient_email"], cls="muted")), status_badge(item["status"]), cls="table-row") for item in contract["signatures"]]
@@ -554,24 +573,50 @@ def invitation_page(invitation: dict | None, token_value: str, csrf: str, signed
     return Html(head("Workspace invitation"), Body(Main(Div(A("← FastCLM", href="/", cls="back-link"), body, cls="auth-wrap"), cls="auth-page")))
 
 
-def settings_page(actor: Actor, key: dict, usage: dict, memberships: list[dict], csrf: str, notice: str = "") -> Html:
+def settings_page(actor: Actor, key: dict, usage: dict, memberships: list[dict], retention: dict, backups: list[dict], csrf: str, notice: str = "") -> Html:
     workspace_rows = [Div(
-        Div(Strong(item["organisation_name"]), Small(item["role"].title())),
+        Div(Strong(item["organisation_name"]), Small(item["role"].title()), cls="identity-copy"),
         status_badge("active") if item["organisation_id"] == actor.organisation_id else Form(
             Input(type="hidden", name="csrf", value=csrf), Input(type="hidden", name="organisation_id", value=item["organisation_id"]),
             Button("Switch", cls="button secondary small"), action="/organisations/switch", method="post",
         ), cls="table-row",
     ) for item in memberships]
+    backup_rows = [Div(
+        Div(Strong(item["created_at"][:19].replace("T", " ")), Small(f"{item['byte_size'] / 1024:.1f} KB · encrypted · {item['storage_backend']}")),
+        A("Download", href=f"/backups/{item['id']}/download", cls="quiet-link"), cls="table-row",
+    ) for item in backups]
+    infrastructure = Div(
+        Section(
+            H3("Source retention"),
+            P("When enabled, source attachments for expired or terminated contracts are removed after the selected period. Version text, checksums, and audit history remain.", cls="muted"),
+            Form(
+                Input(type="hidden", name="csrf", value=csrf),
+                Label(Input(type="checkbox", name="enabled", value="true", checked=retention["enabled"]), "Enable automatic retention", cls="checkbox-label"),
+                Label("Retention period (days)", Input(type="number", name="days", min="30", max="3650", value=retention["days"], required=True)),
+                Button("Save policy", cls="button"), action="/settings/retention", method="post", cls="form-stack",
+            ),
+            Form(Input(type="hidden", name="csrf", value=csrf), Button("Run retention now", cls="button secondary"), action="/settings/retention/run", method="post"),
+            cls="panel",
+        ),
+        Section(
+            H3("Encrypted backups"),
+            P("Create a tenant-scoped, application-encrypted archive of workspace records and verified source attachments.", cls="muted"),
+            Form(Input(type="hidden", name="csrf", value=csrf), Button("Create encrypted backup", cls="button"), action="/settings/backups", method="post"),
+            Div(*backup_rows, cls="table-card") if backup_rows else P("No backups created yet.", cls="muted"),
+            cls="panel",
+        ), cls="two-column",
+    ) if actor.can("team.manage") else None
     content = Div(
         page_intro("SETTINGS", "AI assistant and workspace access", "FastCLM includes five platform-funded xAI queries per user, shared across assistant chat and review. Add your own key to continue without using that allowance."),
         Div(notice, cls="alert success") if notice else None,
         Div(
             Section(H3("AI usage"), Div(stat("Included used", f"{usage['used']} / {usage['limit']}"), stat("Remaining", usage["remaining"]), cls="form-row"), P("Your saved key is used before the platform key and does not consume the included allowance.", cls="muted"), cls="panel"),
-            Section(H3("xAI API key (BYOK)"), P(f"Status: {key['hint']}" if key["configured"] else "No personal key configured", cls="callout"), Form(Input(type="hidden", name="csrf", value=csrf), Label("API key", Input(type="password", name="api_key", autocomplete="new-password", placeholder="xai-…", required=True)), Button("Save encrypted key", cls="button"), action="/settings/xai", method="post", cls="form-stack"), Form(Input(type="hidden", name="csrf", value=csrf), Button("Remove saved key", cls="button danger"), action="/settings/xai/remove", method="post") if key["configured"] else None, P("The key is encrypted at rest and is never returned to the browser.", cls="muted"), cls="panel"),
+            Section(H3("xAI API key (BYOK)"), P(f"Status: {key['hint']}" if key["configured"] else "No personal key configured", cls="callout"), Form(Input(type="hidden", name="csrf", value=csrf), Input(type="hidden", name="username", value=actor.email, autocomplete="username"), Label("API key", Input(type="password", name="api_key", autocomplete="new-password", placeholder="xai-…", required=True)), Button("Save encrypted key", cls="button"), action="/settings/xai", method="post", cls="form-stack"), Form(Input(type="hidden", name="csrf", value=csrf), Button("Remove saved key", cls="button danger"), action="/settings/xai/remove", method="post") if key["configured"] else None, P("The key is encrypted at rest and is never returned to the browser.", cls="muted"), cls="panel"),
             cls="two-column",
         ),
         Section(H3("Workspaces"), P("Switching changes the active tenant for every page and assistant request in this session.", cls="muted"), Div(*workspace_rows, cls="table-card"), cls="panel"),
         Section(H3("SCIM 2.0 provisioning"), P("Provision and deactivate workspace members through the tenant-scoped SCIM endpoint. Configuration is managed with FASTCLM_SCIM_TOKEN and X-FastCLM-Organisation.", cls="muted"), A("SCIM service configuration", href="/scim/v2/ServiceProviderConfig", cls="quiet-link"), cls="panel"),
+        infrastructure,
         cls="page-scroll",
     )
     return shell(actor, "settings", "Settings", content)

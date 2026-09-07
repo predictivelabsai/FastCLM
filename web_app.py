@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import hmac
+import hashlib
 import re
 from urllib.parse import quote
 
@@ -25,14 +26,17 @@ from fastclm.reminders import start_scheduler, stop_scheduler
 from fastclm.security import Actor, csrf_valid, token
 from fastclm.services.audit import AuditService
 from fastclm.services.assistant import AssistantService, find_word_range
+from fastclm.services.backups import BackupService
 from fastclm.services.contracts import ContractService
 from fastclm.services.credentials import clear_xai_key, key_status, store_xai_key, usage
-from fastclm.services.documents import DocumentService, file_checksum
+from fastclm.services.documents import DocumentService
 from fastclm.services.identity import IdentityService
 from fastclm.services.review import ReviewService
+from fastclm.services.retention import RetentionService
 from fastclm.services.scim import ERROR_SCHEMA, SCIMError, SCIMService, USER_SCHEMA
 from fastclm.services.signatures import SignatureService
 from fastclm.services.skills import SkillService
+from fastclm.storage import get_storage
 from fastclm.web.ui import (
     audit_page,
     assistant_page,
@@ -548,15 +552,16 @@ def version_download(request, version_id: str):
     if isinstance(actor, Response):
         return actor
     version = get_database().one("SELECT * FROM contract_versions WHERE id=? AND organisation_id=?", (version_id, actor.organisation_id))
-    if not version or not version["storage_path"]:
+    if not version or not version["storage_path"] or version["attachment_purged_at"]:
         return PlainTextResponse("Attachment not found", status_code=404)
-    path = (settings.upload_dir / version["storage_path"]).resolve()
-    root = settings.upload_dir.resolve()
-    if root not in path.parents or not path.is_file():
+    try:
+        content = get_storage(version["storage_backend"], settings).get(version["storage_path"])
+    except FileNotFoundError:
         return PlainTextResponse("Attachment not found", status_code=404)
-    if version["source_checksum"] and file_checksum(path) != version["source_checksum"]:
+    if version["source_checksum"] and hashlib.sha256(content).hexdigest() != version["source_checksum"]:
         return PlainTextResponse("Attachment integrity check failed", status_code=409)
-    return FileResponse(path, media_type=version["media_type"], filename=version["source_filename"])
+    filename = str(version["source_filename"]).replace('"', "")
+    return Response(content, media_type=version["media_type"], headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 @rt("/versions/{version_id}/inline")
@@ -565,16 +570,16 @@ def version_inline(request, version_id: str):
     if isinstance(actor, Response):
         return actor
     version = get_database().one("SELECT * FROM contract_versions WHERE id=? AND organisation_id=?", (version_id, actor.organisation_id))
-    if not version or not version["storage_path"] or version["media_type"] != "application/pdf":
+    if not version or not version["storage_path"] or version["media_type"] != "application/pdf" or version["attachment_purged_at"]:
         return PlainTextResponse("PDF attachment not found", status_code=404)
-    path = (settings.upload_dir / version["storage_path"]).resolve()
-    root = settings.upload_dir.resolve()
-    if root not in path.parents or not path.is_file():
+    try:
+        content = get_storage(version["storage_backend"], settings).get(version["storage_path"])
+    except FileNotFoundError:
         return PlainTextResponse("PDF attachment not found", status_code=404)
-    if version["source_checksum"] and file_checksum(path) != version["source_checksum"]:
+    if version["source_checksum"] and hashlib.sha256(content).hexdigest() != version["source_checksum"]:
         return PlainTextResponse("Attachment integrity check failed", status_code=409)
     filename = str(version["source_filename"]).replace('"', "")
-    return FileResponse(path, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{filename}"'})
+    return Response(content, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{filename}"'})
 
 
 @rt("/pdf-provenance", methods=["POST"])
@@ -837,7 +842,61 @@ def user_settings(request, notice: str = ""):
     actor = _required(request)
     if isinstance(actor, Response):
         return actor
-    return settings_page(actor, key_status(actor.user_id), usage(actor.user_id), IdentityService().memberships(actor.user_id), request.session["csrf_token"], notice)
+    retention = RetentionService().policy(actor)
+    backups = BackupService().list(actor) if actor.can("team.manage") else []
+    return settings_page(actor, key_status(actor.user_id), usage(actor.user_id), IdentityService().memberships(actor.user_id), retention, backups, request.session["csrf_token"], notice)
+
+
+@rt("/settings/retention", methods=["POST"])
+async def retention_policy_save(request):
+    actor, data = await _form(request, "team.manage")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        RetentionService().set_policy(actor, str(data.get("enabled", "")) == "true", int(data.get("days", 2555)))
+        message = "Retention policy saved"
+    except Exception as exc:
+        message = str(exc)
+    return RedirectResponse(f"/settings?notice={quote(message)}", status_code=303)
+
+
+@rt("/settings/retention/run", methods=["POST"])
+async def retention_run(request):
+    actor, _ = await _form(request, "team.manage")
+    if isinstance(actor, Response):
+        return actor
+    result = RetentionService().run(actor.organisation_id, actor)
+    return RedirectResponse(f"/settings?notice=Retention+complete%3A+{result['purged']}+attachments+purged", status_code=303)
+
+
+@rt("/settings/backups", methods=["POST"])
+async def backup_create(request):
+    actor, _ = await _form(request, "team.manage")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        BackupService().create(actor)
+        message = "Encrypted workspace backup created"
+    except Exception as exc:
+        message = str(exc)
+    return RedirectResponse(f"/settings?notice={quote(message)}", status_code=303)
+
+
+@rt("/backups/{backup_id}/download")
+def backup_download(request, backup_id: str):
+    actor = _required(request, "team.manage")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        item, content = BackupService().content(actor, backup_id)
+    except LookupError:
+        return PlainTextResponse("Backup not found", status_code=404)
+    except ValueError as exc:
+        return PlainTextResponse(str(exc), status_code=409)
+    return Response(
+        content, media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="fastclm-{item["created_at"][:10]}-{item["id"]}.enc"'},
+    )
 
 
 @rt("/settings/xai", methods=["POST"])
@@ -1004,6 +1063,12 @@ def healthz():
         "ai": {"provider": "xai", "model": settings.xai_model, "platform_key": "configured" if settings.xai_api_key else "disabled"},
         "email": "configured" if settings.postmark_api_token else "disabled",
         "scim": "configured" if settings.scim_token else "disabled",
+        "documents": {
+            "storage": settings.storage_backend,
+            "ocr": "enabled" if settings.ocr_enabled else "disabled",
+            "scanner": "builtin+clamav" if settings.clamav_host else "builtin",
+            "backup_key": "configured" if settings.backup_key else "derived",
+        },
         "reminders": {"scheduler": "enabled" if settings.reminder_scheduler_enabled else "disabled"},
     }, status_code=200 if database_status == "ok" else 503)
 

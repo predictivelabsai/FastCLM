@@ -32,11 +32,12 @@ Updated: 2026-09-07
   and immutable, attributable version history.
 - Deterministic Playwright product capture, validated screenshot manifest,
   README walkthrough, and the same animated walkthrough on the landing page.
+- Scanned-PDF OCR with page-level provenance, pre-persistence structural and
+  optional ClamAV scanning, local/S3-compatible private object storage,
+  opt-in terminal-contract source retention, and encrypted tenant backups.
 
 ## Next production increments
 
-- OCR for scanned PDFs, malware scanning, object storage, retention controls,
-  and encrypted backups.
 - Page-aware and character-offset citation anchoring, multi-matter memory, and
   conversational skill testing/refinement against example documents.
 - Clause insertion, redlining/diff, comments, mentions, assignments, template
@@ -46,7 +47,6 @@ Updated: 2026-09-07
 - Explicitly confirmed SignWell/DocuSign dispatch, webhook signature
   verification, signer status, completed-PDF retrieval, and evidence trails.
 - Reminder preferences, escalation paths, and Postmark templates.
-- PostgreSQL repository parity, S3-compatible storage, full-text search, and
-  observability.
+- PostgreSQL repository parity, full-text search, and observability.
 - Jurisdiction-specific legal content reviewed by qualified counsel. Current
   UK/EU material is generic product scaffolding and not legal advice.

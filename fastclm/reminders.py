@@ -10,6 +10,7 @@ import httpx
 from fastclm.config import settings
 from fastclm.database import get_database
 from fastclm.services.identity import new_id, now
+from fastclm.services.retention import RetentionService
 
 
 logger = logging.getLogger("fastclm.reminders")
@@ -79,6 +80,8 @@ async def _scheduler() -> None:
         try:
             result = await asyncio.to_thread(run)
             logger.info("Reminder cycle complete: %s", result)
+            retention = await asyncio.to_thread(RetentionService().run_all)
+            logger.info("Retention cycle complete: %s", retention)
         except Exception:
             logger.exception("Reminder cycle failed")
         await asyncio.sleep(settings.reminder_interval_seconds)
