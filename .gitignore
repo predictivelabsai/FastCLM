@@ -205,6 +205,13 @@ tempCodeRunnerFile.py
 
 # Ruff stuff:
 .ruff_cache/
+.playwright-cli/
+output/
+data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.sesskey
 
 # PyPI configuration file
 .pypirc

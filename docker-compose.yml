@@ -1,0 +1,12 @@
+services:
+  fastclm:
+    build: .
+    env_file: .env
+    ports:
+      - "5025:5025"
+    volumes:
+      - fastclm-data:/data
+    restart: unless-stopped
+
+volumes:
+  fastclm-data:
