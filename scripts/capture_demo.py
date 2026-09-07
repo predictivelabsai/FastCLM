@@ -31,8 +31,9 @@ CAPTURES = (
     "10-developers.png",
     "11-landing-mobile.png",
     "12-ai-assistant-mobile.png",
+    "13-team.png",
 )
-FRAMES = CAPTURES[1:10]
+FRAMES = CAPTURES[1:10] + ("13-team.png",)
 
 
 def wait_for_server(process: subprocess.Popen) -> None:
@@ -109,6 +110,8 @@ def main() -> None:
             shot(page, "09-obligations.png")
             page.goto(f"{BASE}/developers", wait_until="networkidle")
             shot(page, "10-developers.png")
+            page.goto(f"{BASE}/team", wait_until="networkidle")
+            shot(page, "13-team.png")
 
             mobile_public = browser.new_context(viewport={"width": 390, "height": 844}, device_scale_factor=1)
             mobile_page = mobile_public.new_page()

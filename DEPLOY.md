@@ -11,8 +11,14 @@
 - Persistent volume: `/data`
 
 Copy `.env.coolify.sample` into Coolify's environment editor and replace every
-blank secret. Generate `FASTCLM_SECRET` and `FASTCLM_API_TOKEN` independently.
+blank secret. Generate `FASTCLM_SECRET`, `FASTCLM_API_TOKEN`, and
+`FASTCLM_SCIM_TOKEN` independently.
 Never commit their values.
+
+SCIM clients use `https://clm.fastsme.com/scim/v2`, authenticate with
+`FASTCLM_SCIM_TOKEN`, and send the target workspace UUID in
+`X-FastCLM-Organisation`. Keep the SCIM token separate from the integration API
+token so either surface can be rotated or disabled independently.
 
 Set `FASTCLM_REMINDER_SCHEDULER_ENABLED=true` for the single-process container.
 The default hourly cycle is retry-safe and records successful or failed

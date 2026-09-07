@@ -116,6 +116,7 @@ NAV = (
     ("Counterparties", "/counterparties", "counterparties", "contracts.view"),
     ("Clause library", "/clauses", "clauses", "contracts.view"),
     ("Skills library", "/skills", "skills", "assistant.use"),
+    ("Team", "/team", "team", None),
     ("Audit trail", "/audit", "audit", "audit.view"),
     ("Settings", "/settings", "settings", None),
 )
@@ -471,7 +472,96 @@ def audit_page(actor: Actor, rows: list[dict]) -> Html:
     return shell(actor, "audit", "Audit trail", content)
 
 
-def settings_page(actor: Actor, key: dict, usage: dict, csrf: str, notice: str = "") -> Html:
+def team_page(actor: Actor, data: dict, csrf: str, notice: str = "", error: str = "") -> Html:
+    roles = ("admin", "legal", "approver", "member")
+    members = []
+    for item in data["members"]:
+        controls = None
+        if actor.can("team.manage") and item["role"] != "owner":
+            controls = Div(
+                Form(
+                    Input(type="hidden", name="csrf", value=csrf),
+                    Select(*[Option(role.title(), value=role, selected=role == item["role"]) for role in roles], name="role"),
+                    Button("Update role", cls="button secondary small"),
+                    action=f"/team/{item['user_id']}/role", method="post", cls="inline-actions",
+                ),
+                Form(
+                    Input(type="hidden", name="csrf", value=csrf),
+                    Button("Remove", cls="button danger small"),
+                    action=f"/team/{item['user_id']}/remove", method="post",
+                ),
+                cls="inline-actions",
+            )
+        members.append(Div(Div(Strong(item["name"]), Small(item["email"]), cls="identity-copy"), Div(status_badge(item["role"]), controls, cls="inline-actions"), cls="table-row"))
+    invitations = [
+        Div(
+            Div(Strong(item["email"]), Small(f"Invited by {item['invited_by_name']} · expires {item['expires_at']}"), cls="identity-copy"),
+            Div(
+                status_badge(item["role"]),
+                Form(Input(type="hidden", name="csrf", value=csrf), Button("Revoke", cls="button secondary small"), action=f"/team/invitations/{item['id']}/revoke", method="post") if actor.can("team.manage") else None,
+                cls="inline-actions",
+            ),
+            cls="table-row",
+        ) for item in data["invitations"]
+    ]
+    invite = Section(
+        H3("Invite a teammate"),
+        P("Invitation links expire after seven days. The recipient can use an existing account, Google, or create a local account.", cls="muted"),
+        Form(
+            Input(type="hidden", name="csrf", value=csrf),
+            Label("Email", Input(type="email", name="email", required=True)),
+            Label("Role", Select(*[Option(role.title(), value=role) for role in roles], name="role")),
+            Button("Send invitation", cls="button"),
+            action="/team/invitations", method="post", cls="form-stack",
+        ),
+        cls="panel",
+    ) if actor.can("team.manage") else None
+    content = Div(
+        page_intro("WORKSPACE ACCESS", "People and permissions", "Invite teammates and administer fixed roles without weakening the workspace owner boundary."),
+        Div(notice, cls="alert success") if notice else None,
+        Div(error, cls="alert error") if error else None,
+        Div(
+            Section(H3(f"Members · {len(members)}"), Div(*members, cls="table-card"), cls="panel"),
+            invite,
+            cls="two-column",
+        ),
+        Section(H3("Pending invitations"), Div(*invitations, cls="table-card") if invitations else empty_state("No pending invitations", "New invitations will appear here until accepted or revoked."), cls="panel"),
+        cls="page-scroll",
+    )
+    return shell(actor, "team", "Team", content)
+
+
+def invitation_page(invitation: dict | None, token_value: str, csrf: str, signed_in_email: str = "", error: str = "") -> Html:
+    if not invitation:
+        body = Div(logo(), H1("Invitation unavailable"), P(error or "This invitation is invalid, expired, revoked, or already used.", cls="alert error"), A("Return to sign in", href="/login", cls="button full"), cls="auth-card")
+    else:
+        matching = not signed_in_email or signed_in_email.lower() == invitation["email"].lower()
+        body = Div(
+            logo(), H1(f"Join {invitation['organisation_name']}"),
+            P(f"You were invited as {invitation['role'].title()} using {invitation['email']}.", cls="muted"),
+            Div(error, cls="alert error") if error else None,
+            Form(Input(type="hidden", name="csrf", value=csrf), Input(type="hidden", name="token", value=token_value), Button("Accept invitation", cls="button full"), action="/invitations/actions/accept", method="post") if signed_in_email and matching else None,
+            Div(P(f"You are signed in as {signed_in_email}. Sign out and use {invitation['email']} to accept.", cls="alert error"), A("Sign out", href="/logout", cls="button secondary full")) if signed_in_email and not matching else None,
+            Div(A("Sign in to accept", href="/login", cls="button full"), A("Continue with Google", href="/auth/google", cls="button secondary full"), cls="form-stack") if not signed_in_email and invitation["existing_user"] else None,
+            Form(
+                Input(type="hidden", name="csrf", value=csrf), Input(type="hidden", name="token", value=token_value),
+                Label("Your name", Input(name="name", required=True, autocomplete="name")),
+                Label("Create a password", Input(type="password", name="password", minlength="10", required=True, autocomplete="new-password")),
+                Button("Create account and join", cls="button full"), action="/invitations/actions/accept", method="post", cls="form-stack",
+            ) if not signed_in_email and not invitation["existing_user"] else None,
+            cls="auth-card",
+        )
+    return Html(head("Workspace invitation"), Body(Main(Div(A("← FastCLM", href="/", cls="back-link"), body, cls="auth-wrap"), cls="auth-page")))
+
+
+def settings_page(actor: Actor, key: dict, usage: dict, memberships: list[dict], csrf: str, notice: str = "") -> Html:
+    workspace_rows = [Div(
+        Div(Strong(item["organisation_name"]), Small(item["role"].title())),
+        status_badge("active") if item["organisation_id"] == actor.organisation_id else Form(
+            Input(type="hidden", name="csrf", value=csrf), Input(type="hidden", name="organisation_id", value=item["organisation_id"]),
+            Button("Switch", cls="button secondary small"), action="/organisations/switch", method="post",
+        ), cls="table-row",
+    ) for item in memberships]
     content = Div(
         page_intro("SETTINGS", "AI assistant and workspace access", "FastCLM includes five platform-funded xAI queries per user, shared across assistant chat and review. Add your own key to continue without using that allowance."),
         Div(notice, cls="alert success") if notice else None,
@@ -480,6 +570,8 @@ def settings_page(actor: Actor, key: dict, usage: dict, csrf: str, notice: str =
             Section(H3("xAI API key (BYOK)"), P(f"Status: {key['hint']}" if key["configured"] else "No personal key configured", cls="callout"), Form(Input(type="hidden", name="csrf", value=csrf), Label("API key", Input(type="password", name="api_key", autocomplete="new-password", placeholder="xai-…", required=True)), Button("Save encrypted key", cls="button"), action="/settings/xai", method="post", cls="form-stack"), Form(Input(type="hidden", name="csrf", value=csrf), Button("Remove saved key", cls="button danger"), action="/settings/xai/remove", method="post") if key["configured"] else None, P("The key is encrypted at rest and is never returned to the browser.", cls="muted"), cls="panel"),
             cls="two-column",
         ),
+        Section(H3("Workspaces"), P("Switching changes the active tenant for every page and assistant request in this session.", cls="muted"), Div(*workspace_rows, cls="table-card"), cls="panel"),
+        Section(H3("SCIM 2.0 provisioning"), P("Provision and deactivate workspace members through the tenant-scoped SCIM endpoint. Configuration is managed with FASTCLM_SCIM_TOKEN and X-FastCLM-Organisation.", cls="muted"), A("SCIM service configuration", href="/scim/v2/ServiceProviderConfig", cls="quiet-link"), cls="panel"),
         cls="page-scroll",
     )
     return shell(actor, "settings", "Settings", content)

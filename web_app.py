@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hmac
 import re
 from urllib.parse import quote
 
@@ -28,6 +29,7 @@ from fastclm.services.credentials import clear_xai_key, key_status, store_xai_ke
 from fastclm.services.documents import DocumentService, file_checksum
 from fastclm.services.identity import IdentityService
 from fastclm.services.review import ReviewService
+from fastclm.services.scim import ERROR_SCHEMA, SCIMError, SCIMService, USER_SCHEMA
 from fastclm.services.signatures import SignatureService
 from fastclm.services.skills import SkillService
 from fastclm.web.ui import (
@@ -44,6 +46,8 @@ from fastclm.web.ui import (
     settings_page,
     skill_detail_page,
     skills_page,
+    invitation_page,
+    team_page,
     recovery_page,
 )
 from web.api import api
@@ -130,6 +134,31 @@ def _contract_page(request, contract_id: str, notice: str = ""):
     )
 
 
+def _scim_response(data: dict, status_code: int = 200, headers: dict | None = None) -> JSONResponse:
+    return JSONResponse(data, status_code=status_code, headers=headers, media_type="application/scim+json")
+
+
+def _scim_error(exc: SCIMError | str, status_code: int = 400, scim_type: str = "invalidValue") -> JSONResponse:
+    if isinstance(exc, SCIMError):
+        status_code, scim_type, detail = exc.status, exc.scim_type, str(exc)
+    else:
+        detail = str(exc)
+    return _scim_response({"schemas": [ERROR_SCHEMA], "status": str(status_code), "scimType": scim_type, "detail": detail}, status_code)
+
+
+def _scim_organisation(request) -> tuple[str, None] | tuple[None, JSONResponse]:
+    if not settings.scim_token:
+        return None, _scim_error("SCIM provisioning is not configured", 503)
+    supplied = request.headers.get("authorization", "")
+    expected = f"Bearer {settings.scim_token}"
+    if not hmac.compare_digest(supplied, expected):
+        return None, _scim_error("A valid bearer token is required", 401, "invalidToken")
+    organisation_id = request.headers.get("x-fastclm-organisation", "").strip()
+    if not get_database().one("SELECT id FROM organisations WHERE id=?", (organisation_id,)):
+        return None, _scim_error("A valid X-FastCLM-Organisation header is required", 400)
+    return organisation_id, None
+
+
 @rt("/")
 def home(request):
     return RedirectResponse("/app", status_code=303) if _actor(request) else landing_page()
@@ -147,10 +176,19 @@ async def login_submit(request):
     user = IdentityService().authenticate(str(data.get("email", "")), str(data.get("password", "")))
     if not user:
         return RedirectResponse("/login?error=invalid", status_code=303)
-    memberships = IdentityService().memberships(user["id"])
+    identity = IdentityService()
+    pending_invitation = str(request.session.get("pending_invitation", ""))
+    if pending_invitation:
+        try:
+            user, organisation = identity.accept_invitation(pending_invitation, user_id=user["id"])
+            _login(request.session, user, organisation)
+            return RedirectResponse("/app?notice=Invitation+accepted", status_code=303)
+        except Exception as exc:
+            return RedirectResponse(f"/login?error={quote(str(exc))}", status_code=303)
+    memberships = identity.memberships(user["id"])
     if not memberships:
         return RedirectResponse("/login?error=No+active+workspace", status_code=303)
-    organisation = IdentityService().organisation(memberships[0]["organisation_id"])
+    organisation = identity.organisation(memberships[0]["organisation_id"])
     _login(request.session, user, organisation)
     return RedirectResponse("/app", status_code=303)
 
@@ -233,7 +271,13 @@ def google_start(request):
 def google_callback(request, code: str = "", state: str = ""):
     try:
         profile = google_exchange(code, state, request.session)
-        user, organisation = IdentityService().ensure_oauth_workspace(profile["email"], profile["name"])
+        identity = IdentityService()
+        pending_invitation = str(request.session.get("pending_invitation", ""))
+        if pending_invitation:
+            user = identity.ensure_oauth_user(profile["email"], profile["name"])
+            user, organisation = identity.accept_invitation(pending_invitation, user_id=user["id"])
+        else:
+            user, organisation = identity.ensure_oauth_workspace(profile["email"], profile["name"])
         _login(request.session, user, organisation)
         return RedirectResponse("/app", status_code=303)
     except Exception:
@@ -253,6 +297,53 @@ def test_auth(request):
 def logout(request):
     request.session.clear()
     return RedirectResponse("/", status_code=303)
+
+
+@rt("/invitations/{invitation_token}")
+def invitation_view(request, invitation_token: str, error: str = ""):
+    invitation = IdentityService().invitation(invitation_token)
+    request.session.setdefault("csrf_token", token())
+    if invitation:
+        request.session["pending_invitation"] = invitation_token
+    actor = _actor(request)
+    return invitation_page(invitation, invitation_token, request.session["csrf_token"], actor.email if actor else "", error)
+
+
+@rt("/invitations/actions/accept", methods=["POST"])
+async def invitation_accept(request):
+    data = await request.form()
+    invitation_token = str(data.get("token", ""))
+    if not csrf_valid(request.session, str(data.get("csrf", ""))):
+        return PlainTextResponse("Invalid CSRF token", status_code=403)
+    actor = _actor(request)
+    try:
+        user, organisation = IdentityService().accept_invitation(
+            invitation_token,
+            user_id=actor.user_id if actor else "",
+            name=str(data.get("name", "")),
+            password=str(data.get("password", "")),
+        )
+        _login(request.session, user, organisation)
+        return RedirectResponse("/app?notice=Invitation+accepted", status_code=303)
+    except Exception as exc:
+        invitation = IdentityService().invitation(invitation_token)
+        return invitation_page(invitation, invitation_token, request.session["csrf_token"], actor.email if actor else "", str(exc))
+
+
+@rt("/organisations/switch", methods=["POST"])
+async def organisation_switch(request):
+    actor, data = await _form(request)
+    if isinstance(actor, Response):
+        return actor
+    organisation_id = str(data.get("organisation_id", ""))
+    try:
+        target_actor = IdentityService().actor(actor.user_id, organisation_id)
+        organisation = IdentityService().organisation(organisation_id)
+    except LookupError:
+        return PlainTextResponse("Workspace not found", status_code=404)
+    AuditService().record(target_actor, "session", actor.user_id, "session.organisation.switched", {"from": actor.organisation_id})
+    _login(request.session, IdentityService().user(actor.user_id), organisation)
+    return RedirectResponse("/app", status_code=303)
 
 
 @rt("/app")
@@ -671,12 +762,72 @@ def audit(request):
     return audit_page(actor, AuditService().list(actor))
 
 
+@rt("/team")
+def team(request, notice: str = "", error: str = ""):
+    actor = _required(request)
+    if isinstance(actor, Response):
+        return actor
+    return team_page(actor, IdentityService().team(actor), request.session["csrf_token"], notice, error)
+
+
+@rt("/team/invitations", methods=["POST"])
+async def team_invite(request):
+    actor, data = await _form(request, "team.manage")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        invitation, invitation_token = IdentityService().invite(actor, str(data.get("email", "")), str(data.get("role", "")))
+        delivered = send_account_action(
+            invitation["email"], "there", f"Join {actor.organisation_name} on FastCLM", f"/invitations/{invitation_token}",
+        )
+        notice = "Invitation sent" if delivered else "Invitation created, but email delivery is not configured"
+        return RedirectResponse(f"/team?notice={quote(notice)}", status_code=303)
+    except Exception as exc:
+        return RedirectResponse(f"/team?error={quote(str(exc))}", status_code=303)
+
+
+@rt("/team/invitations/{invitation_id}/revoke", methods=["POST"])
+async def team_invitation_revoke(request, invitation_id: str):
+    actor, _ = await _form(request, "team.manage")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        IdentityService().revoke_invitation(actor, invitation_id)
+        return RedirectResponse("/team?notice=Invitation+revoked", status_code=303)
+    except Exception as exc:
+        return RedirectResponse(f"/team?error={quote(str(exc))}", status_code=303)
+
+
+@rt("/team/{user_id}/role", methods=["POST"])
+async def team_role(request, user_id: str):
+    actor, data = await _form(request, "team.manage")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        IdentityService().update_role(actor, user_id, str(data.get("role", "")))
+        return RedirectResponse("/team?notice=Role+updated", status_code=303)
+    except Exception as exc:
+        return RedirectResponse(f"/team?error={quote(str(exc))}", status_code=303)
+
+
+@rt("/team/{user_id}/remove", methods=["POST"])
+async def team_remove(request, user_id: str):
+    actor, _ = await _form(request, "team.manage")
+    if isinstance(actor, Response):
+        return actor
+    try:
+        IdentityService().remove_member(actor, user_id)
+        return RedirectResponse("/team?notice=Member+removed", status_code=303)
+    except Exception as exc:
+        return RedirectResponse(f"/team?error={quote(str(exc))}", status_code=303)
+
+
 @rt("/settings")
 def user_settings(request, notice: str = ""):
     actor = _required(request)
     if isinstance(actor, Response):
         return actor
-    return settings_page(actor, key_status(actor.user_id), usage(actor.user_id), request.session["csrf_token"], notice)
+    return settings_page(actor, key_status(actor.user_id), usage(actor.user_id), IdentityService().memberships(actor.user_id), request.session["csrf_token"], notice)
 
 
 @rt("/settings/xai", methods=["POST"])
@@ -706,6 +857,122 @@ def developers():
     return developer_page()
 
 
+@rt("/scim/v2/ServiceProviderConfig")
+def scim_service_provider_config():
+    return _scim_response({
+        "schemas": ["urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"],
+        "documentationUri": f"{settings.public_url}/developers",
+        "patch": {"supported": True},
+        "bulk": {"supported": False, "maxOperations": 0, "maxPayloadSize": 0},
+        "filter": {"supported": True, "maxResults": 100},
+        "changePassword": {"supported": False},
+        "sort": {"supported": False},
+        "etag": {"supported": False},
+        "authenticationSchemes": [{
+            "type": "oauthbearertoken", "name": "Bearer token",
+            "description": "FASTCLM_SCIM_TOKEN plus X-FastCLM-Organisation",
+            "specUri": "https://www.rfc-editor.org/rfc/rfc6750",
+            "primary": True,
+        }],
+        "meta": {"resourceType": "ServiceProviderConfig", "location": f"{settings.public_url}/scim/v2/ServiceProviderConfig"},
+    })
+
+
+@rt("/scim/v2/ResourceTypes")
+def scim_resource_types():
+    resource = {
+        "schemas": ["urn:ietf:params:scim:schemas:core:2.0:ResourceType"],
+        "id": "User", "name": "User", "description": "FastCLM workspace member",
+        "endpoint": "/Users", "schema": USER_SCHEMA,
+        "meta": {"resourceType": "ResourceType", "location": f"{settings.public_url}/scim/v2/ResourceTypes/User"},
+    }
+    return _scim_response({"schemas": ["urn:ietf:params:scim:api:messages:2.0:ListResponse"], "totalResults": 1, "Resources": [resource]})
+
+
+@rt("/scim/v2/Schemas")
+def scim_schemas():
+    schema = {
+        "schemas": ["urn:ietf:params:scim:schemas:core:2.0:Schema"],
+        "id": USER_SCHEMA, "name": "User", "description": "FastCLM workspace member",
+        "attributes": [
+            {"name": "userName", "type": "string", "multiValued": False, "required": True, "caseExact": False, "mutability": "immutable", "returned": "always", "uniqueness": "server"},
+            {"name": "displayName", "type": "string", "multiValued": False, "required": False, "caseExact": False, "mutability": "readWrite", "returned": "default", "uniqueness": "none"},
+            {"name": "externalId", "type": "string", "multiValued": False, "required": False, "caseExact": True, "mutability": "readWrite", "returned": "default", "uniqueness": "none"},
+            {"name": "active", "type": "boolean", "multiValued": False, "required": False, "mutability": "readWrite", "returned": "default"},
+        ],
+        "meta": {"resourceType": "Schema", "location": f"{settings.public_url}/scim/v2/Schemas/{USER_SCHEMA}"},
+    }
+    return _scim_response({"schemas": ["urn:ietf:params:scim:api:messages:2.0:ListResponse"], "totalResults": 1, "Resources": [schema]})
+
+
+@rt("/scim/v2/Users", methods=["GET"])
+def scim_users(request, filter: str = "", startIndex: int = 1, count: int = 100):
+    organisation_id, error = _scim_organisation(request)
+    if error:
+        return error
+    try:
+        return _scim_response(SCIMService().list(organisation_id, filter, startIndex, count))
+    except SCIMError as exc:
+        return _scim_error(exc)
+
+
+@rt("/scim/v2/Users", methods=["POST"])
+async def scim_user_create(request):
+    organisation_id, error = _scim_organisation(request)
+    if error:
+        return error
+    try:
+        resource = SCIMService().create(organisation_id, await request.json())
+        return _scim_response(resource, 201, {"Location": resource["meta"]["location"]})
+    except SCIMError as exc:
+        return _scim_error(exc)
+
+
+@rt("/scim/v2/Users/{scim_id}", methods=["GET"])
+def scim_user_get(request, scim_id: str):
+    organisation_id, error = _scim_organisation(request)
+    if error:
+        return error
+    try:
+        return _scim_response(SCIMService().get(organisation_id, scim_id))
+    except SCIMError as exc:
+        return _scim_error(exc)
+
+
+@rt("/scim/v2/Users/{scim_id}", methods=["PUT"])
+async def scim_user_replace(request, scim_id: str):
+    organisation_id, error = _scim_organisation(request)
+    if error:
+        return error
+    try:
+        return _scim_response(SCIMService().replace(organisation_id, scim_id, await request.json()))
+    except SCIMError as exc:
+        return _scim_error(exc)
+
+
+@rt("/scim/v2/Users/{scim_id}", methods=["PATCH"])
+async def scim_user_patch(request, scim_id: str):
+    organisation_id, error = _scim_organisation(request)
+    if error:
+        return error
+    try:
+        return _scim_response(SCIMService().patch(organisation_id, scim_id, await request.json()))
+    except SCIMError as exc:
+        return _scim_error(exc)
+
+
+@rt("/scim/v2/Users/{scim_id}", methods=["DELETE"])
+def scim_user_delete(request, scim_id: str):
+    organisation_id, error = _scim_organisation(request)
+    if error:
+        return error
+    try:
+        SCIMService().delete(organisation_id, scim_id)
+        return PlainTextResponse("", status_code=204, media_type="application/scim+json")
+    except SCIMError as exc:
+        return _scim_error(exc)
+
+
 @rt("/swagger.json")
 def swagger_schema():
     return JSONResponse(api.openapi())
@@ -726,6 +993,7 @@ def healthz():
         "database": {"status": database_status, "dialect": "sqlite", "migrations": migrations},
         "ai": {"provider": "xai", "model": settings.xai_model, "platform_key": "configured" if settings.xai_api_key else "disabled"},
         "email": "configured" if settings.postmark_api_token else "disabled",
+        "scim": "configured" if settings.scim_token else "disabled",
         "reminders": {"scheduler": "enabled" if settings.reminder_scheduler_enabled else "disabled"},
     }, status_code=200 if database_status == "ok" else 503)
 

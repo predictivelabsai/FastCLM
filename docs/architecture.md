@@ -16,6 +16,8 @@ Word / PDF ─ extraction ──────┼─ immutable contract versions
                               ├─ deterministic / xAI review
                               ├─ Postmark reminder runner
                               └─ DocuSign / SignWell adapter drafts
+
+SCIM /scim/v2 ─ bearer + organisation ─ memberships + audit
 ```
 
 ## Trust boundaries
@@ -33,6 +35,13 @@ Word / PDF ─ extraction ──────┼─ immutable contract versions
   disabled without a configured token.
 - Personal xAI keys are encrypted before persistence and never rendered back to
   the browser.
+- Invitation bearer values are shown only in the outbound link; only their
+  SHA-256 digests are stored. Acceptance requires the invited email identity,
+  and role/removal operations cannot change or remove the workspace owner.
+- SCIM user calls require an independent bearer token and explicit organisation
+  ID. Provisioning IDs and external IDs are tenant-scoped; SCIM display names
+  do not overwrite a shared user's global profile, and deprovisioning cannot
+  remove an owner.
 - Uploaded source files receive their own SHA-256 digest; downloads verify the
   stored bytes before serving an attachment. Inline PDF viewing repeats the
   same session, tenant, path, media-type, and digest checks.

@@ -30,6 +30,7 @@ class Settings:
     google_allowed_domains: tuple[str, ...]
     google_allowed_emails: tuple[str, ...]
     api_token: str
+    scim_token: str
     xai_api_key: str
     xai_base_url: str
     xai_model: str
@@ -64,6 +65,7 @@ class Settings:
             google_allowed_domains=_csv("GOOGLE_ALLOWED_DOMAINS"),
             google_allowed_emails=_csv("GOOGLE_ALLOWED_EMAILS"),
             api_token=(os.getenv("FASTCLM_API_TOKEN", "") or os.getenv("FASTSME_API_TOKEN", "")).strip(),
+            scim_token=os.getenv("FASTCLM_SCIM_TOKEN", "").strip(),
             xai_api_key=os.getenv("XAI_API_KEY", "").strip(),
             xai_base_url=os.getenv("XAI_BASE_URL", "https://api.x.ai/v1").rstrip("/"),
             xai_model=os.getenv("XAI_MODEL", "grok-4-1-fast-reasoning").strip(),

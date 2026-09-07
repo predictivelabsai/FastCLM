@@ -7,3 +7,4 @@
 08-contract-record.png
 09-obligations.png
 10-developers.png
+13-team.png

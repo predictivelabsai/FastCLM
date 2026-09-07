@@ -13,6 +13,9 @@ from fastclm.database import get_database
 from fastclm.security import Actor, hash_password, verify_password
 
 
+MANAGED_ROLES = {"admin", "legal", "approver", "member"}
+
+
 def now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -82,6 +85,26 @@ class IdentityService:
         SkillService().seed(organisation_id, user_id)
         return self.user(user_id), self.organisation(organisation_id)
 
+    def ensure_oauth_user(self, email: str, name: str) -> dict:
+        """Return a verified OAuth user without implicitly creating a workspace."""
+        email = email.strip().lower()
+        if "@" not in email:
+            raise ValueError("A valid email is required")
+        db = get_database()
+        user = db.one("SELECT id FROM users WHERE email=?", (email,))
+        if user:
+            with db.transaction() as tx:
+                tx.execute("UPDATE users SET is_verified=1,name=? WHERE id=?", ((name or email.split("@", 1)[0]).strip(), user["id"]))
+            return self.user(user["id"])
+        user_id, created = new_id(), now()
+        with db.transaction() as tx:
+            tx.execute(
+                "INSERT INTO users(id,email,name,password_hash,created_at,is_verified) VALUES (?,?,?,?,?,1)",
+                (user_id, email, (name or email.split("@", 1)[0]).strip(), None, created),
+            )
+            tx.execute("INSERT INTO user_ai_allowances(user_id,platform_queries_used,updated_at) VALUES (?,0,?)", (user_id, created))
+        return self.user(user_id)
+
     def memberships(self, user_id: str) -> list[dict]:
         return get_database().rows(
             "SELECT m.*,o.name organisation_name FROM memberships m JOIN organisations o ON o.id=m.organisation_id WHERE m.user_id=? ORDER BY m.created_at",
@@ -110,6 +133,150 @@ class IdentityService:
         if not row:
             raise LookupError("Organisation not found")
         return row
+
+    def team(self, actor: Actor) -> dict:
+        members = get_database().rows(
+            "SELECT m.user_id,m.role,m.created_at,u.name,u.email FROM memberships m "
+            "JOIN users u ON u.id=m.user_id WHERE m.organisation_id=? ORDER BY CASE m.role WHEN 'owner' THEN 0 ELSE 1 END,u.name",
+            (actor.organisation_id,),
+        )
+        invitations = get_database().rows(
+            "SELECT i.id,i.email,i.role,i.expires_at,i.created_at,u.name invited_by_name FROM team_invitations i "
+            "JOIN users u ON u.id=i.invited_by WHERE i.organisation_id=? AND i.accepted_at IS NULL "
+            "AND i.revoked_at IS NULL AND i.expires_at>? ORDER BY i.created_at DESC",
+            (actor.organisation_id, int(time.time())),
+        )
+        return {"members": members, "invitations": invitations}
+
+    def invite(self, actor: Actor, email: str, role: str, ttl_seconds: int = 7 * 24 * 3600) -> tuple[dict, str]:
+        from fastclm.services.audit import AuditService
+
+        actor.require("team.manage")
+        email, role = email.strip().lower(), role.strip().lower()
+        if "@" not in email:
+            raise ValueError("A valid email is required")
+        if role not in MANAGED_ROLES:
+            raise ValueError("Choose an administrator, legal, approver, or member role")
+        value, created, expires = secrets.token_urlsafe(32), now(), int(time.time()) + max(3600, ttl_seconds)
+        digest = hashlib.sha256(value.encode()).hexdigest()
+        invitation_id = new_id()
+        with get_database().transaction() as tx:
+            if tx.one(
+                "SELECT 1 FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.organisation_id=? AND u.email=?",
+                (actor.organisation_id, email),
+            ):
+                raise ValueError("That person is already a workspace member")
+            tx.execute(
+                "UPDATE team_invitations SET revoked_at=? WHERE organisation_id=? AND email=? "
+                "AND accepted_at IS NULL AND revoked_at IS NULL",
+                (int(time.time()), actor.organisation_id, email),
+            )
+            tx.execute(
+                "INSERT INTO team_invitations(id,organisation_id,email,role,token_hash,invited_by,expires_at,created_at) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (invitation_id, actor.organisation_id, email, role, digest, actor.user_id, expires, created),
+            )
+            AuditService().record(actor, "team_invitation", invitation_id, "team.invitation.created", {"email": email, "role": role}, tx)
+        return get_database().one("SELECT id,email,role,expires_at,created_at FROM team_invitations WHERE id=?", (invitation_id,)), value
+
+    def invitation(self, value: str) -> dict | None:
+        digest = hashlib.sha256(value.encode()).hexdigest()
+        return get_database().one(
+            "SELECT i.id,i.organisation_id,i.email,i.role,i.expires_at,o.name organisation_name,"
+            "CASE WHEN u.id IS NULL THEN 0 ELSE 1 END existing_user FROM team_invitations i "
+            "JOIN organisations o ON o.id=i.organisation_id LEFT JOIN users u ON u.email=i.email "
+            "WHERE i.token_hash=? AND i.accepted_at IS NULL AND i.revoked_at IS NULL AND i.expires_at>?",
+            (digest, int(time.time())),
+        )
+
+    def accept_invitation(self, value: str, user_id: str = "", name: str = "", password: str = "") -> tuple[dict, dict]:
+        from fastclm.services.audit import AuditService
+
+        digest, accepted = hashlib.sha256(value.encode()).hexdigest(), int(time.time())
+        created_user = False
+        with get_database().transaction() as tx:
+            invitation = tx.one(
+                "SELECT i.*,o.name organisation_name FROM team_invitations i JOIN organisations o ON o.id=i.organisation_id "
+                "WHERE i.token_hash=? AND i.accepted_at IS NULL AND i.revoked_at IS NULL AND i.expires_at>?",
+                (digest, accepted),
+            )
+            if not invitation:
+                raise ValueError("Invitation is invalid, expired, or already used")
+            if user_id:
+                user = tx.one("SELECT id,email,name FROM users WHERE id=?", (user_id,))
+                if not user or user["email"].lower() != invitation["email"].lower():
+                    raise PermissionError("Sign in with the email address that was invited")
+            else:
+                if tx.one("SELECT id FROM users WHERE email=?", (invitation["email"],)):
+                    raise ValueError("An account already exists. Sign in to accept this invitation")
+                user_id, created_user = new_id(), True
+                clean_name = name.strip()
+                if not clean_name:
+                    raise ValueError("Your name is required")
+                tx.execute(
+                    "INSERT INTO users(id,email,name,password_hash,created_at,is_verified) VALUES (?,?,?,?,?,1)",
+                    (user_id, invitation["email"], clean_name, hash_password(password), now()),
+                )
+                tx.execute("INSERT INTO user_ai_allowances(user_id,platform_queries_used,updated_at) VALUES (?,0,?)", (user_id, now()))
+                user = {"id": user_id, "email": invitation["email"], "name": clean_name}
+            tx.execute(
+                "INSERT OR IGNORE INTO memberships(organisation_id,user_id,role,created_at) VALUES (?,?,?,?)",
+                (invitation["organisation_id"], user_id, invitation["role"], now()),
+            )
+            tx.execute(
+                "UPDATE team_invitations SET accepted_by=?,accepted_at=? WHERE id=? AND accepted_at IS NULL",
+                (user_id, accepted, invitation["id"]),
+            )
+            invitee = Actor(user_id, user["email"], user["name"], invitation["organisation_id"], invitation["organisation_name"], invitation["role"])
+            AuditService().record(invitee, "team_invitation", invitation["id"], "team.invitation.accepted", {"role": invitation["role"]}, tx)
+        if created_user:
+            self.seed_clauses(invitation["organisation_id"])
+            from fastclm.services.skills import SkillService
+            SkillService().seed(invitation["organisation_id"], user_id)
+        return self.user(user_id), self.organisation(invitation["organisation_id"])
+
+    def revoke_invitation(self, actor: Actor, invitation_id: str) -> None:
+        from fastclm.services.audit import AuditService
+
+        actor.require("team.manage")
+        with get_database().transaction() as tx:
+            result = tx.execute(
+                "UPDATE team_invitations SET revoked_at=? WHERE id=? AND organisation_id=? "
+                "AND accepted_at IS NULL AND revoked_at IS NULL",
+                (int(time.time()), invitation_id, actor.organisation_id),
+            )
+            if result.rowcount != 1:
+                raise LookupError("Pending invitation not found")
+            AuditService().record(actor, "team_invitation", invitation_id, "team.invitation.revoked", {}, tx)
+
+    def update_role(self, actor: Actor, user_id: str, role: str) -> None:
+        from fastclm.services.audit import AuditService
+
+        actor.require("team.manage")
+        role = role.strip().lower()
+        if role not in MANAGED_ROLES:
+            raise ValueError("The owner role cannot be assigned here")
+        with get_database().transaction() as tx:
+            membership = tx.one("SELECT role FROM memberships WHERE organisation_id=? AND user_id=?", (actor.organisation_id, user_id))
+            if not membership:
+                raise LookupError("Member not found")
+            if membership["role"] == "owner":
+                raise ValueError("The workspace owner role cannot be changed")
+            tx.execute("UPDATE memberships SET role=? WHERE organisation_id=? AND user_id=?", (role, actor.organisation_id, user_id))
+            AuditService().record(actor, "membership", user_id, "team.member.role_changed", {"from": membership["role"], "to": role}, tx)
+
+    def remove_member(self, actor: Actor, user_id: str) -> None:
+        from fastclm.services.audit import AuditService
+
+        actor.require("team.manage")
+        with get_database().transaction() as tx:
+            membership = tx.one("SELECT role FROM memberships WHERE organisation_id=? AND user_id=?", (actor.organisation_id, user_id))
+            if not membership:
+                raise LookupError("Member not found")
+            if membership["role"] == "owner":
+                raise ValueError("The workspace owner cannot be removed")
+            tx.execute("DELETE FROM memberships WHERE organisation_id=? AND user_id=?", (actor.organisation_id, user_id))
+            AuditService().record(actor, "membership", user_id, "team.member.removed", {"role": membership["role"]}, tx)
 
     def issue_token(self, user_id: str, purpose: str, ttl_seconds: int) -> str:
         if purpose not in {"verify", "reset"}:

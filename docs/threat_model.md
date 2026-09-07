@@ -4,7 +4,7 @@
 
 Contract files and extracted text, commercial metadata, approval decisions,
 counterparty contacts, per-user provider keys, session secrets, integration
-tokens, and audit history.
+tokens, invitation links, SCIM identity mappings, and audit history.
 
 ## Principal risks and current controls
 
@@ -12,6 +12,11 @@ tokens, and audit history.
   tenant-checked attachment downloads.
 - **Unauthorised writes:** signed sessions, CSRF tokens, role permissions, and
   service-boundary checks.
+- **Access-management takeover:** hashed expiring invitation tokens, invited
+  email matching, fixed role choices, owner protection, and audited member
+  changes.
+- **Cross-tenant provisioning:** a separate SCIM bearer token plus mandatory
+  organisation header, tenant-scoped IDs, and owner-safe deprovisioning.
 - **Lifecycle bypass:** central transition catalogue plus an approval
   prerequisite for activation.
 - **Document replacement:** immutable snapshots, original attachment retention,

@@ -6,6 +6,8 @@ Updated: 2026-09-07
 
 - Multi-tenant workspaces, local accounts, Google OIDC, fixed permission roles,
   CSRF protection, and append-only audit events.
+- Expiring team invitations, owner-safe role administration, organisation
+  switching, and tenant-scoped SCIM 2.0 user provisioning/deprovisioning.
 - Searchable contract register, counterparties, commercial dates and values,
   reviewed lifecycle transitions, approvals, obligations, renewals, and expiry
   visibility.
@@ -33,7 +35,6 @@ Updated: 2026-09-07
 
 ## Next production increments
 
-- Team invitations, role administration, organisation switching, and SCIM.
 - OCR for scanned PDFs, malware scanning, object storage, retention controls,
   and encrypted backups.
 - Page-aware and character-offset citation anchoring, multi-matter memory, and

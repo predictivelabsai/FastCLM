@@ -13,6 +13,7 @@ def developer_page() -> Html:
         ("Obligations", "Read due work or create an audited obligation for a workspace contract.", "/api/v1/obligations", "GET · POST"),
         ("Counterparties", "Connect contract relationships to finance, CRM, and reporting systems.", "/api/v1/counterparties", "GET"),
         ("Electronic signatures", "Prepare provider-neutral DocuSign and SignWell payloads in the workspace UI.", "/contracts/{id}/signatures", "POST"),
+        ("SCIM 2.0", "Provision, update, filter, and deactivate members in one explicit workspace.", "/scim/v2/Users", "GET · POST · PUT · PATCH · DELETE"),
     )
     description = "Private FastCLM API, OpenAPI schemas, and electronic-signature adapter contracts."
     return Html(
@@ -25,7 +26,7 @@ def developer_page() -> Html:
             *seo_meta(path="/developers", title="FastCLM Developer API · FastSME", description=description),
             Link(rel="icon", href="/static/favicon.svg", type="image/svg+xml"),
             Link(rel="stylesheet", href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Newsreader:opsz,wght@6..72,600&display=swap"),
-            Link(rel="stylesheet", href="/static/app.css?v=2"),
+            Link(rel="stylesheet", href="/static/app.css?v=4"),
         ),
         Body(
             Header(logo(), Nav(A("API docs", href="/api/docs", cls="public-link"), A("Sign In", href="/login", cls="public-signin"), cls="public-links"), cls="public-nav"),
@@ -69,6 +70,12 @@ def developer_page() -> Html:
                     H2("Signature providers"),
                     P("The current adapters create reviewable local payloads only. SignWell maps to POST /api/v1/documents with X-Api-Key authentication, draft/test-mode controls, recipients, metadata, and source-version context. DocuSign maps to an envelope draft. Dispatch and webhook processing remain deliberately gated follow-up work.", cls="dev-lede"),
                     P(A("SignWell create-document reference ↗", href="https://developers.signwell.com/reference/createdocument", target="_blank", rel="noopener noreferrer", cls="quiet-link")),
+                    H2("SCIM 2.0 provisioning"),
+                    P("Use a dedicated SCIM bearer token and identify the tenant on every user request. FastCLM supports service discovery, User list/filter/get/create/replace/patch/delete, stable service-issued IDs, client external IDs, and active-state deprovisioning.", cls="dev-lede"),
+                    Pre(Code(f'''curl "{settings.public_url}/scim/v2/Users?filter=userName%20eq%20%22person%40example.com%22" \\
+  -H "Authorization: Bearer $FASTCLM_SCIM_TOKEN" \\
+  -H "X-FastCLM-Organisation: $FASTCLM_ORGANISATION_ID"'''), cls="code"),
+                    P(A("IETF SCIM protocol (RFC 7644) ↗", href="https://www.rfc-editor.org/rfc/rfc7644", target="_blank", rel="noopener noreferrer", cls="quiet-link")),
                     cls="dev-wrap",
                 ),
             ),

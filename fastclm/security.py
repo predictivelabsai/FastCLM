@@ -12,8 +12,8 @@ from typing import Any
 PBKDF2_ROUNDS = 600_000
 
 PERMISSIONS = {
-    "owner": frozenset({"assistant.use", "skills.manage", "contracts.view", "contracts.edit", "contracts.transition", "contracts.approve", "obligations.manage", "clauses.manage", "audit.view"}),
-    "admin": frozenset({"assistant.use", "skills.manage", "contracts.view", "contracts.edit", "contracts.transition", "contracts.approve", "obligations.manage", "clauses.manage", "audit.view"}),
+    "owner": frozenset({"assistant.use", "skills.manage", "contracts.view", "contracts.edit", "contracts.transition", "contracts.approve", "obligations.manage", "clauses.manage", "audit.view", "team.manage"}),
+    "admin": frozenset({"assistant.use", "skills.manage", "contracts.view", "contracts.edit", "contracts.transition", "contracts.approve", "obligations.manage", "clauses.manage", "audit.view", "team.manage"}),
     "legal": frozenset({"assistant.use", "skills.manage", "contracts.view", "contracts.edit", "contracts.transition", "obligations.manage", "clauses.manage", "audit.view"}),
     "approver": frozenset({"assistant.use", "contracts.view", "contracts.approve", "audit.view"}),
     "member": frozenset({"assistant.use", "contracts.view", "contracts.edit", "obligations.manage"}),

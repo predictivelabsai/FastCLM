@@ -24,6 +24,8 @@ Connect and a token-gated integration API are optional.
 
 - Organisation-isolated workspaces with owner, administrator, legal,
   approver, and member roles.
+- Expiring email invitations, role administration, protected owner access,
+  and in-session switching between every workspace a user belongs to.
 - Assistant-first contract workspace with persistent conversations, streamed
   xAI tokens, live tool activity, and durable tool receipts.
 - Organisation-scoped retrieval with exact source versions and word-level
@@ -47,6 +49,8 @@ Connect and a token-gated integration API are optional.
 - Google OIDC with state validation and verified-email allowlists.
 - Authenticated, organisation-scoped FastAPI routes with paginated reads,
   an audited obligation write, generated OpenAPI docs, and a committed schema.
+- Tenant-scoped SCIM 2.0 user provisioning with discovery, filtering,
+  create/replace/patch/deactivate operations, and audited deprovisioning.
 - Responsive public landing page and workspace, health/SEO endpoints, Docker,
   and Coolify-ready configuration for `clm.fastsme.com`.
 
@@ -84,12 +88,14 @@ Disable that route in production.
 - Counterparties: `/counterparties`
 - Clause library: `/clauses`
 - Skills library: `/skills`
+- Team and invitations: `/team`
 - Audit trail: `/audit`
 - Developer guide: `/developers`
 - API discovery: `/api/`
 - API documentation: `/api/docs`
 - Runtime OpenAPI: `/api/openapi.json`
 - Stable OpenAPI snapshot: `/swagger.json`
+- SCIM discovery: `/scim/v2/ServiceProviderConfig`
 - Health: `/healthz`
 
 ## Deployment
@@ -125,6 +131,11 @@ assistant messages, and tool receipts are workspace-scoped. Citation
 verification checks whether the quoted words occur consecutively in the cited
 immutable version; it does not prove the model's interpretation. Assistant
 answers are assistive signals, not legal advice.
+
+SCIM user routes are independently disabled until `FASTCLM_SCIM_TOKEN` is
+configured. They require that bearer token and an explicit
+`X-FastCLM-Organisation` header. SCIM identities and external IDs are scoped to
+that workspace; deprovisioning cannot remove the workspace owner.
 
 FastCLM ships with synthetic data only. Do not load production agreements into
 an unreviewed demo deployment.
